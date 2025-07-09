@@ -8502,7 +8502,7 @@ do
             
             surface.SetFont("veranda")
             
-            local txt = "protogen.sex alpha | ".. pLocalPlayer:Name() .." | Version: v3 | uid 1"
+            local txt = "protogen.sex alpha | ".. pLocalPlayer:Name() .." | Version: v3 "
             
             local txtsizex, txtsizey = surface.GetTextSize(txt)
             draw.RoundedBox(2, 5, 3, txtsizex+10, txtsizey+3, Color(36,36,36,234))
