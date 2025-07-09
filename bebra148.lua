@@ -5247,10 +5247,6 @@ function GetServerTime()
     return CurTime()   
 end
 
-    if ( ultimate.cfg.vars["Wait for simulation"] and ( ply:GetVelocity():Length() ~= 0 and not ply.simtime_updated ) ) then
-        return 
-    end
-
 ultimate.grabbingEnt = false 
 
 function ultimate.DrawPhysgunBeamFunc( ply, wep, e, tar, bone, hitpos )
@@ -5556,6 +5552,10 @@ function ultimate.Aim(cmd)
     end
 
     if not ultimate.CanShoot(cmd) then return end
+
+    if ( ultimate.cfg.vars["Wait for simulation"] and ( ply:GetVelocity():Length() ~= 0 and not ply.simtime_updated ) ) then
+        return 
+    end
 
     if not ultimate.cfg.vars["Aimbot smoothing"] and ultimate.SkipCommand then return end
 
@@ -8081,7 +8081,7 @@ end
         end
 
         if ultimate.cfg.vars["Simtime updated"] then
-            local name = v. updated and "Updated" or "Same"
+            local name = v.simtime_updated and "Updated" or "Same"
             local pos = ultimate.cfg.vars["Simtime pos"]
             local tw, th = surface.GetTextSize(name)
 
@@ -8502,7 +8502,7 @@ do
             
             surface.SetFont("veranda")
             
-            local txt = "protogen.sex alpha | ".. pLocalPlayer:Name() .." | Version: v3 "
+            local txt = "protogen.sex alpha | ".. pLocalPlayer:Name() .." | Version: v3 | uid 1"
             
             local txtsizex, txtsizey = surface.GetTextSize(txt)
             draw.RoundedBox(2, 5, 3, txtsizex+10, txtsizey+3, Color(36,36,36,234))
