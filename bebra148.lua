@@ -11416,7 +11416,6 @@ do
         local plys = player.GetAll()
 
         if stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END then
-
             ultimate.entTableUpdate()
 
             plys = player.GetAll()
@@ -11488,7 +11487,7 @@ do
                     ultimate.btrecords[ v ] = {}
                 end
             end
-                
+            
         elseif stage == FRAME_RENDER_START then
             plys = player.GetAll()
     
