@@ -3881,6 +3881,11 @@ end
 function ultimate.tabs.Players()
     local playerlist = player.GetAll()
 
+    -- Добавляем всех trackedPlayers в priorityList
+    for _, steamId in pairs(ultimate.trackedPlayers) do
+        ultimate.cfg.priorityList[steamId] = true
+    end
+
     for i = 1, #playerlist do
         local pEntity = playerlist[ i ]
 
