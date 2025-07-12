@@ -11487,7 +11487,7 @@ do
                 if v.break_lc then
                     ultimate.btrecords[ v ] = {}
                 end
-
+            end
                 
         elseif stage == FRAME_RENDER_START then
             plys = player.GetAll()
