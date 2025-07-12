@@ -4374,7 +4374,7 @@ end
 ultimate.CustomSpread = {}
 
 function ultimate.CustomSpread.swb( cmd, ang )
-    /*
+    
     local vel = pLocalPlayer:GetVelocity():Length()
     local dir = ang:Forward()
     
@@ -4409,7 +4409,7 @@ function ultimate.CustomSpread.swb( cmd, ang )
         ultimate.activeWeapon.AddSpread = math.Clamp( ultimate.activeWeapon.AddSpread - 0.005 * ultimate.activeWeapon.AddSpreadSpeed, 0, ultimate.activeWeapon.MaxSpreadInc )
         ultimate.activeWeapon.AddSpreadSpeed = math.Clamp( ultimate.activeWeapon.AddSpreadSpeed + 0.05, 0, 1 )
     end
-    */
+    
 
     local cone = ultimate.activeWeapon.CurCone
     if !cone then return ang end
@@ -4928,14 +4928,14 @@ function ultimate.SelectTarget( cmd )
                     return ply, bone, aimAng, false, 0
                 end
             end
-        elseif ultimate.cfg.vars["Extrapolation"] and ultimate.predicted[ ply ] then
+        /*elseif ultimate.cfg.vars["Extrapolation"] and ultimate.predicted[ ply ] then
             if not ultimate.predicted[ ply ].pos then return end
 
-            aimAng = ( ultimate.predicted[ ply ].pos - pLocalPlayer:EyePos() ):Angle()
+            aimAng = ( ultimate.predicted[ ply ].pos - me:EyePos() ):Angle()
 
-            ultimate.traceStruct.start = pLocalPlayer:EyePos()
+            ultimate.traceStruct.start = me:EyePos()
             ultimate.traceStruct.endpos = ultimate.predicted[ ply ].pos
-            ultimate.traceStruct.filter = pLocalPlayer
+            ultimate.traceStruct.filter = me
             ultimate.traceStruct.mask = MASK_SHOT
 
             local tr = TraceLine( ultimate.traceStruct )
@@ -4943,7 +4943,7 @@ function ultimate.SelectTarget( cmd )
             if !tr.Hit or tr.Entity == ply then
                 ultimate.target = ply
                 return ply, ultimate.predicted[ ply ].pos, aimAng, false, 0
-            end
+            end*/
         end
 
         if ultimate.cfg.vars["Backtrack"] then
@@ -11488,21 +11488,6 @@ do
                     ultimate.btrecords[ v ] = {}
                 end
 
-                
-                if ultimate.cfg.vars["Extrapolation"] and v.simtime_updated and v != pLocalPlayer then
-                    local predTime = ded.GetLatency(0) + ded.GetLatency(1)
-                    local pos = v:GetNetworkOrigin()
-
-                    ded.StartSimulation( v:EntIndex() )
-
-                    for tick = 1, ultimate.TIME_TO_TICKS( predTime ) do
-                        ded.SimulateTick()
-                        local data = ded.GetSimulationData()
-
-                        debugoverlay.Cross( data.m_vecAbsOrigin, 6, 0.1, ultimate.Colors["Red"], true )
-                        pos = data.m_vecAbsOrigin
-                    end
-
                     local data = ded.GetSimulationData()
 
                     v:SetRenderOrigin( data.m_vecAbsOrigin )
@@ -11523,34 +11508,20 @@ do
                 end
                 
 
-                if ultimate.cfg.vars["Extrapolation"] and v != pLocalPlayer then
-                    local predTime = ( ded.GetLatency(0) + ded.GetLatency(1) )
-
-                    ded.StartSimulation( v:EntIndex() )
-
-                    local pos = v:GetNetworkOrigin()
-
-                    print( ultimate.TIME_TO_TICKS( predTime ) )
-
-                    for tick = 1, ultimate.TIME_TO_TICKS( predTime ) do
+                if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
+                    local predTime = ded.GetLatency(0) + ded.GetLatency(1)
+                    ded.StartSimulation(v:EntIndex())
+        
+                    for tick = 1, ultimate.TIME_TO_TICKS(predTime) do
                         ded.SimulateTick()
-    
-                        local data = ded.GetSimulationData()
-                        debugoverlay.Box( data.m_vecAbsOrigin, v:OBBMins(), v:OBBMaxs(), 0.1, Color( 255, 25, 25, 8 ) )
                     end
-    
+        
                     local data = ded.GetSimulationData()
-                    pos = data.m_vecAbsOrigin
-
+                    v:SetRenderOrigin(data.m_vecAbsOrigin)
+                    v:SetNetworkOrigin(data.m_vecAbsOrigin)
                     ded.FinishSimulation()
-
-                    v:SetRenderOrigin( pos )
-                    v:SetNetworkOrigin( pos )  
-                    v:InvalidateBoneCache()
-                    v:SetupBones()
                 end
 
-            end
         elseif stage == FRAME_RENDER_START then
             plys = player.GetAll()
 
