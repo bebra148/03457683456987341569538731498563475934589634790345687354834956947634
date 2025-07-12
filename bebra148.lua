@@ -279,6 +279,8 @@ ultimate.cfg.vars["LBY break delta"]            = 120
 ultimate.cfg.vars["Sin delta"]                  = 89
 ultimate.cfg.vars["Sin add"]                    = 11
 ultimate.cfg.vars["Jitter delta"]               = 45
+ultimate.cfg.vars["Low delta value"]            = 0
+ultimate.cfg.vars["Switch time"]                = 0.6
 
 
 
@@ -293,7 +295,9 @@ ultimate.presets["Yaw"] = {
     "Fake Jitter", "Kappa Jitter", "Abu Jitter",
     "Satanic Spin", "Custom",
     "Hand Block", "Low delta",
-    "Fake Switch", "Tank AA",
+    "Desync", "Tank AA", "Fake switch",
+    "Dolphin Mode", "Freeze Frame",
+    "Invisible Man", "Matrix Glitch"
 }
 ultimate.cfg.vars["Pitch"]                      = 1
 ultimate.presets["Pitch"] = { 
@@ -3222,7 +3226,7 @@ function ultimate.tabs.Rage()
     ultimate.ui.Slider( p, "Custom real","Custom real", -180, 180, 0 )
     ultimate.ui.Slider( p, "Custom fake","Custom fake", -180, 180, 0 )
     ultimate.ui.Slider( p, "Fake switch","Fake switch", -180, 180, 0 )
-    ultimate.ui.Slider( p, "Real switch","Real switch", -180, 180, 0 )
+    ultimate.ui.Slider( p, "Switch time","Switch time", 0, 10, 1 )
     ultimate.ui.Slider( p, "Custom pitch","Custom pitch", -360, 360, 0 )    
     ultimate.ui.Slider( p, "Spin speed","Spin speed", -50, 50, 0 )
     ultimate.ui.Slider( p, "Min Lby Delta","LBY min delta", 0, 360, 0 )
@@ -3230,6 +3234,8 @@ function ultimate.tabs.Rage()
     ultimate.ui.Slider( p, "Sin delta","Sin delta", -360, 360, 0 )
     ultimate.ui.Slider( p, "Sin add","Sin add", -180, 180, 0 )
     ultimate.ui.Slider( p, "Jitter delta","Jitter delta", -180, 180, 0 )
+    ultimate.ui.Slider( p, "Low delta value","Low delta value", -180, 180, 0 )
+
 
     local p = ultimate.itemPanel( "Fake lag",2,110 ):GetItemPanel()
 
@@ -3292,9 +3298,9 @@ function ultimate.tabs.Rage()
     ultimate.ui.CheckBox( p, "Resolver", "Resolver" )
     ultimate.ui.CheckBox( p, "Pitch resolver", "Pitch resolver" )
     ultimate.ui.CheckBox( p, "Taunt resolver", "Taunt resolver" )
-    ultimate.ui.Slider( p, "Resolver max misses", "Resolver max misses", 0, 10, 0 )
+    --ultimate.ui.Slider( p, "Resolver max misses", "Resolver max misses", 0, 10, 0 )
     ultimate.ui.Slider( p, "add delta", "add delta", -180, 180, 0 )
-    ultimate.ui.Slider( p, "add pitch", "add pitch", -90, 90, 0 )
+    --ultimate.ui.Slider( p, "add pitch", "add pitch", -90, 90, 0 )
 
     local p = ultimate.itemPanel( "Position adjustment", 3, 215 ):GetItemPanel()
 
@@ -4016,7 +4022,7 @@ ultimate.ttable["Misc"]     = ultimate.tabs.Misc
 ultimate.ttable["Config"] = ultimate.tabs.Config
 ultimate.ttable["Players"]  = ultimate.tabs.Players
 ultimate.ttable["Entities"]  = ultimate.tabs.Entities
-ultimate.ttable["resolver"]  = ultimate.tabs.resolver
+--ultimate.ttable["resolver"]  = ultimate.tabs.resolver
 
 function ultimate.initTab(tab)
     if ultimate.scrollpanel != nil then ultimate.scrollpanel:Remove() end
@@ -4074,7 +4080,7 @@ ultimate.tabButton( "Misc",          ultimate.frame:GetTopPanel() )
 ultimate.tabButton( "Config",        ultimate.frame:GetTopPanel() ) 
 ultimate.tabButton( "Players",       ultimate.frame:GetTopPanel() ) 
 ultimate.tabButton( "Entities",       ultimate.frame:GetTopPanel() ) 
-ultimate.tabButton( "resolver",       ultimate.frame:GetTopPanel() ) 
+--ultimate.tabButton( "resolver",       ultimate.frame:GetTopPanel() ) 
                     
 ultimate.ttable["Aimbot"]()
 
@@ -5694,8 +5700,11 @@ function ultimate.Aim(cmd)
         pLocalPlayer.simtime_updated = true
         ded.UpdateClientAnimation( pLocalPlayer:EntIndex() )
 
+        -- Улучшенный счетчик выстрелов
         if ultimate.cfg.vars["Resolver"] then 
             ply.aimshots = (ply.aimshots or 0) + 1
+            -- Сбрасываем счетчик если он слишком большой
+            if ply.aimshots > 100 then ply.aimshots = 0 end
         end
 
         local isAutomatic = true
@@ -6336,13 +6345,43 @@ ultimate.CalcYaw = {
         return ultimate.SendPacket and baseyaw + ultimate.cfg.vars["Custom real"] or baseyaw + ultimate.cfg.vars["Custom fake"]
     end,
     // Hand block 
-    [17] = function( cmd )  
-    // Low Delta
-    --[18] = function( cmd )
-      --  return chat.AddText("[SUB] Not working")
-    --end
+    [17] = function(cmd)
+        local target_angle = baseyaw - 90  -- Левый бок относительно текущего взгляда
+        return target_angle
     end,
+
+    // Low Delta
+    [18] = function( cmd )
+        local delta = ultimate.cfg.vars["Low delta value"] or 28  // Можно настроить в конфиге
+        local dynamic_delta = math.sin(CurTime() * 2) * (delta / 2)  // Плавное изменение дельты
+        
+        if ultimate.SendPacket then
+            return baseyaw - (ultimate.inverted and -delta or delta) + dynamic_delta
+        else
+            return baseyaw + (ultimate.inverted and -delta or delta) - dynamic_delta
+        end
+    end,
+
+    // Desync
     [19] = function( cmd )        
+            local send = ultimate.SendPacket
+        local baseyaw = ultimate.GetBaseYaw()
+        local inverter = ultimate.cfg.vars["Inverter"]
+
+        -- динамический случайный оффсет для фейка
+        local jitterRange = ultimate.cfg.vars["Jitter delta"] or 35
+        local jitter = math.random(-jitterRange, jitterRange)
+
+        -- real и fake
+        local realYaw = baseyaw + (inverter and -ultimate.cfg.vars["Custom real"] or ultimate.cfg.vars["Custom real"])
+        local fakeYaw = baseyaw + (inverter and ultimate.cfg.vars["Custom fake"] or -ultimate.cfg.vars["Custom fake"]) + jitter
+
+        -- лево/право чередуется по времени
+        local timeSwitch = (CurTime() * 3) % 2 > 1
+        if timeSwitch then fakeYaw = fakeYaw + math.random(-20, 20) end
+
+        -- применение
+        return send and realYaw or fakeYaw
     end,
     [20] = function( cmd )
         
@@ -6353,12 +6392,154 @@ ultimate.CalcYaw = {
         return ultimate.inverted and a or b
 
     end,
+    // Fake switch
+    [21] = function(cmd)
+        -- Инициализация системы
+        if not ultimate.BruteBreaker then
+            ultimate.BruteBreaker = {
+                last_angles = {},
+                avoid_angles = {0, 30, -30, -60, 60, -90, 90, 120, -120, 150, -150, 180},
+                safe_zones = {},
+                next_switch = 0,
+                lby_timer = 0,
+                chaos_level = 1.0
+            }
+            -- Генерация безопасных зон между углами брутфорса
+            for i = 1, #ultimate.BruteBreaker.avoid_angles-1 do
+                local mid = (ultimate.BruteBreaker.avoid_angles[i] + ultimate.BruteBreaker.avoid_angles[i+1])/2
+                table.insert(ultimate.BruteBreaker.safe_zones, mid)
+            end
+        end
+        local BB = ultimate.BruteBreaker
 
+        -- Настройки из конфига
+        local REAL_POWER = ultimate.cfg.vars["Custom fake"] or 35  -- Сила движения реальной модели
+        local FAKE_POWER = ultimate.cfg.vars["Fake switch"] or 60  -- Сила фейка
+        local AVOID_FORCE = ultimate.cfg.vars["Avoid force"] or 2.5 -- Сила уклонения от углов брутфорса
 
+        -- Анализ состояния
+        local current_time = CurTime()
+        local vel = pLocalPlayer:GetVelocity():Length2D()
+        local is_moving = vel > 15
+        local lby = ded.GetCurrentLowerBodyYaw(pLocalPlayer:EntIndex())
 
+        -- Система избегания углов брутфорса
+        local function get_safest_angle(base)
+            local best_angle = base
+            local best_score = -math.huge
+            
+            -- Проверяем безопасные зоны + случайные смещения
+            for _, angle in ipairs(BB.safe_zones) do
+                local test_angle = angle + math.random(-15, 15)
+                local score = 0
+                
+                -- Оценка расстояния до всех "опасных" углов
+                for _, brute_angle in ipairs(BB.avoid_angles) do
+                    local dist = math.abs(math.NormalizeAngle(test_angle - brute_angle))
+                    score = score + math.min(dist, 30) * AVOID_FORCE
+                end
+                
+                -- Бонус за непредсказуемость
+                score = score + math.random(0, 20)
+                
+                if score > best_score then
+                    best_score = score
+                    best_angle = test_angle
+                end
+            end
+            
+            return best_angle
+        end
 
+        -- Рывковая система реального угла
+        if current_time > BB.next_switch then
+            BB.current_real_angle = get_safest_angle(baseyaw)
+            BB.next_switch = current_time + math.Rand(0.35, 0.65)
+            BB.chaos_level = 0.8 + math.random() * 0.7
+            
+            -- Случайный мега-рывок
+            if math.random() < 0.2 then
+                BB.current_real_angle = BB.current_real_angle * 1.7
+            end
+        end
 
+        -- LBY Breaker система
+        if current_time > BB.lby_timer then
+            BB.lby_offset = math.random() > 0.5 and 110 or -110
+            BB.lby_timer = current_time + math.Rand(1.3, 2.1)
+        end
 
+        -- Комбинированный реальный угол
+        local real_angle = BB.current_real_angle * (is_moving and 0.8 or 1.2)
+        if math.random() < 0.4 then
+            real_angle = real_angle + lby * 0.3 * BB.chaos_level
+        end
+
+        -- Фейк-система с анти-резолв техниками
+        local fake_angle = 0
+        if is_moving then
+            fake_angle = math.sin(current_time * 18) * FAKE_POWER * 0.7 +
+                        math.cos(current_time * 7) * FAKE_POWER * 0.4 +
+                        math.random(-5, 5)
+        else
+            fake_angle = math.sin(current_time * 12) * FAKE_POWER *
+                        (ultimate.inverted and -1 or 1) *
+                        BB.chaos_level
+        end
+
+        -- Финальный расчет
+        return ultimate.SendPacket and (baseyaw + real_angle * REAL_POWER/35) or 
+            (baseyaw + fake_angle)
+    end,
+    // Dolphin Mode
+    [22] = function(cmd)
+        local wave1 = math.sin(CurTime() * 2) * 60
+        local wave2 = math.cos(CurTime() * 5) * 20
+        local combined = wave1 * 0.7 + wave2 * 0.3
+        
+        return ultimate.SendPacket and (baseyaw - combined) or 
+            (baseyaw + combined * (ultimate.inverted and -1 or 1))
+    end,
+    //Freeze Frame
+    [23] = function(cmd)
+        if not ultimate.last_freeze then
+            ultimate.last_freeze = CurTime()
+            ultimate.freeze_angle = baseyaw - 90
+        end
+        
+        -- Меняем угол каждые 0.8 секунд
+        if CurTime() - ultimate.last_freeze > 0.8 then
+            ultimate.last_freeze = CurTime()
+            ultimate.freeze_angle = baseyaw + math.random(-120, 120)
+        end
+        
+        return ultimate.freeze_angle
+    end,
+    // Invisible Man
+    [24] = function(cmd)
+        local real_offset = ultimate.cfg.vars["Custom real"] or 15
+        local fake_angle = math.sin(CurTime() * 3) * 60
+        
+        if ultimate.SendPacket then
+            cmd:SetViewAngles(Angle(0, baseyaw + real_offset, 0))
+            return real_offset
+        else
+            -- Специальный эффект "ломаной" модели
+            cmd:SetViewAngles(Angle(0, baseyaw + 179.9, 0))
+            return 179.9
+        end
+    end,
+    // Matrix Glitch
+    [25] = function(cmd)
+        local glitch_factor = math.floor(CurTime() * 10) % 3
+        local angles = {
+            baseyaw - 90,
+            baseyaw + 45,
+            baseyaw + 179
+        }
+        
+        return angles[glitch_factor + 1]
+    end
 
 
 } 
@@ -8127,6 +8308,7 @@ function ultimate.DrawFakeModelHitboxes()
     if not ultimate.cfg.vars["Hitbox"] then return end
     if not IsValid(ultimate.fakeModel) then return end
     if not pLocalPlayer:Alive() then return end
+    if ultimate.hideHitboxes then return end -- Добавлена проверка на скрытие
     
     -- Обновляем модель если она изменилась
     local mymodel = pLocalPlayer:GetModel()
@@ -8175,6 +8357,18 @@ end
 
 -- Добавляем в хуки
 hook.Add("PostDrawOpaqueRenderables", "ultimate_DrawFakeHitboxes", ultimate.DrawFakeModelHitboxes)
+
+-- Хук для скрытия хитбоксов по END
+hook.Add("Think", "Ultimate_HideHitboxesKey", function()
+    if input.IsKeyDown(KEY_END) then
+        if not ultimate.hideKeyPressed then
+            ultimate.hideHitboxes = not ultimate.hideHitboxes -- Переключаем состояние
+            ultimate.hideKeyPressed = true
+        end
+    else
+        ultimate.hideKeyPressed = false
+    end
+end)
 
         if ultimate.cfg.vars["Show records"] and ultimate.canBacktrack(v) then
             local len = #ultimate.btrecords[ v ]
@@ -8625,45 +8819,105 @@ end
 
 
 
-function ultimate.PrePlayerDraw( pEntity, iFlags )
-    if ( pEntity == pLocalPlayer ) then
-        return 
-    end
+-- Кэш для хранения данных о игроках
+ultimate.playerData = ultimate.playerData or {}
 
-    pEntity:AnimResetGestureSlot( GESTURE_SLOT_VCD )
-    pEntity:AnimResetGestureSlot( GESTURE_SLOT_CUSTOM )
-
-    pEntity:SetPoseParameter( "head_pitch", 0 )
-    pEntity:SetPoseParameter( "head_yaw", 0 )
-
--- Если Resolver включен, применяем брутфорс-углы + слайдер
-if ( ultimate.cfg.vars["Resolver"] ) then
-    local angs = Angle()
-    angs.y = ultimate.bruteYaw[ pEntity.aimshots % #ultimate.bruteYaw + 1 ] + pEntity:EyeAngles().y + ultimate.cfg.vars["add delta"]
+function ultimate.PrePlayerDraw(pEntity)
+    if pEntity == LocalPlayer() then return end
     
-    pEntity:SetRenderAngles( angs )
-    ded.SetCurrentLowerBodyYaw( pEntity:EntIndex(), angs.y )  
-end
-
--- Если Resolver выключен, но слайдер активен, всё равно применяем его
-if ( not ultimate.cfg.vars["Resolver"] and ultimate.cfg.vars["add delta"] ~= 0 ) then
-    local angs = Angle()
-    angs.y = pEntity:EyeAngles().y + ultimate.cfg.vars["add delta"]
-    
-    pEntity:SetRenderAngles( angs )
-    ded.SetCurrentLowerBodyYaw( pEntity:EntIndex(), angs.y )  
-end
-
-    if ( ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch ) then
-        pEntity:SetPoseParameter( "aim_pitch", -45 )
-        pEntity:SetPoseParameter( "head_pitch", -45 )
+    -- Инициализация данных игрока
+    if not ultimate.playerData[pEntity] then
+        ultimate.playerData[pEntity] = {
+            lastLBY = 0,
+            lbyDelta = 0,
+            lastUpdate = 0,
+            bruteStep = 1,
+            lastHit = 0,
+            lastAngles = Angle(0,0,0)
+        }
     end
     
+    local data = ultimate.playerData[pEntity]
+    local curTime = CurTime()
+    
+    -- Сбрасываем анимации
+    pEntity:AnimResetGestureSlot(GESTURE_SLOT_VCD)
+    pEntity:AnimResetGestureSlot(GESTURE_SLOT_CUSTOM)
+    
+    -- Сбрасываем повороты головы
+    pEntity:SetPoseParameter("head_pitch", 0)
+    pEntity:SetPoseParameter("head_yaw", 0)
+    
+    -- Получаем текущие углы
+    local eyeAngles = pEntity:EyeAngles()
+    data.lastAngles = eyeAngles
+    
+    -- Улучшенный ресольвер
+    if ultimate.cfg.vars["Resolver"] then
+        -- Определяем LBY (Lower Body Yaw)
+        local lby = pEntity:GetPoseParameter("body_yaw")
+        if lby ~= data.lastLBY and curTime - data.lastUpdate > 0.22 then
+            data.lbyDelta = lby - data.lastLBY
+            data.lastLBY = lby
+            data.lastUpdate = curTime
+        end
+        
+        -- Комбинированный подход: LBY + брутфорс + адаптация
+        local resolvedYaw = eyeAngles.y
+        
+        -- Если игрок двигается, используем LBY
+        if pEntity:GetVelocity():Length() > 30 then
+            resolvedYaw = lby
+        else
+            -- Комбинируем несколько методов
+            if data.lastHit > 0 and curTime - data.lastHit < 2 then
+                -- После попадания используем успешный угол
+                resolvedYaw = resolvedYaw + data.lbyDelta
+            else
+                -- Адаптивный брутфорс
+                local bruteIndex = (pEntity.aimshots % #ultimate.bruteYaw) + 1
+                resolvedYaw = resolvedYaw + ultimate.bruteYaw[bruteIndex] * data.bruteStep
+                
+                -- Меняем шаг брута для избежания паттернов
+                if pEntity.aimshots % 5 == 0 then
+                    data.bruteStep = data.bruteStep * -1
+                end
+            end
+        end
+        
+        -- Добавляем дельту из слайдера
+        resolvedYaw = resolvedYaw + (ultimate.cfg.vars["add delta"] or 0)
+        
+        -- Применяем углы
+        local angs = Angle(0, resolvedYaw, 0)
+        pEntity:SetRenderAngles(angs)
+        ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
+    elseif ultimate.cfg.vars["add delta"] ~= 0 then
+        -- Только слайдер если ресольвер выключен
+        local angs = Angle(0, eyeAngles.y + ultimate.cfg.vars["add delta"], 0)
+        pEntity:SetRenderAngles(angs)
+        ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
+    end
+    
+    -- Pitch resolver
+    if ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch then
+        pEntity:SetPoseParameter("aim_pitch", -45)
+        pEntity:SetPoseParameter("head_pitch", -45)
+    end
+    
+    -- Обновляем кэш костей
     pEntity:InvalidateBoneCache()
     pEntity:SetupBones()
-
     pEntity.ChatGestureWeight = 0
 end
+
+-- Хук для отслеживания попаданий
+hook.Add("EntityTakeDamage", "ultimate.ResolverHitTrack", function(target, dmg)
+    if ultimate.cfg.vars["Resolver"] and IsValid(dmg:GetAttacker()) and dmg:GetAttacker() == LocalPlayer() then
+        ultimate.playerData[target] = ultimate.playerData[target] or {}
+        ultimate.playerData[target].lastHit = CurTime()
+    end
+end)
 
 
 // Chams
@@ -11111,8 +11365,10 @@ end
 
 // Resolver 
 
-ultimate.bruteYaw = { 0, -30, 30, -60, 60, -90, 90, -120, 120, -150, 150, -179, 179 }
-
+ultimate.bruteYaw = { 
+    0, 180, -120, 120, 90, -90, -45, 45, 15, -15, 30, -30, 60, -60, 
+    math.random(-180, 180), math.random(-180, 180) -- Добавляем немного рандома для сложности
+}
 
 
 
@@ -11761,4 +12017,855 @@ ultimate.AddHook( "CalcMainActivity", "AnimationFix", CalcMainActivity )
 
 
 
+ultimate.trackedPlayers = {
+    ["STEAM_0:1:436828002"] = true,
+    ["STEAM_0:0:527475945"] = true, 
+    ["STEAM_0:1:543095867"] = true, 
+    ["STEAM_0:0:85161933"] = true,
+    ["STEAM_0:0:539832760"] = true, 
+    ["STEAM_0:0:768366475"] = true, 
+    ["STEAM_0:1:839703715"] = true, 
+    ["STEAM_0:1:100134965"] = true,
+    ["STEAM_0:1:190920688"] = true, 
+    ["STEAM_0:1:567882"] = true, 
+    ["STEAM_0:0:641838651"] = true, 
+    ["STEAM_0:1:589073347"] = true, 
+    ["STEAM_0:0:14148252"] = true, 
+    ["STEAM_0:0:811209569"] = true, 
+    ["STEAM_0:1:806312846"] = true, 
+    ["STEAM_0:0:556281083"] = true, 
+    ["STEAM_0:0:616631834"] = true, 
+    ["STEAM_0:0:453356413"] = true,
+    ["STEAM_0:1:565888199"] = true, 
+    ["STEAM_0:1:813938330"] = true, 
+    ["STEAM_0:1:428620691"] = true,
+    ["STEAM_0:0:529497837"] = true, 
+    ["STEAM_0:1:762276521"] = true, 
+    ["STEAM_0:1:448764194"] = true, 
+    ["STEAM_0:1:765078061"] = true, 
+    ["STEAM_0:1:106651565"] = true, 
+    ["STEAM_0:1:176142806"] = true, 
+    ["STEAM_0:1:455428067"] = true, 
+    ["STEAM_0:1:566826019"] = true, 
+    ["STEAM_0:1:16149313"] = true, 
+    ["STEAM_0:0:423333338"] = true, 
+    ["STEAM_0:1:600204671"] = true, 
+    ["STEAM_0:1:460002163"] = true, 
+    ["STEAM_0:1:795560908"] = true, 
+    ["STEAM_0:0:527794979"] = true,
+    ["STEAM_0:1:2393854"] = true, 
+    ["STEAM_0:0:109145007"] = true, 
+    ["STEAM_0:1:702436824"] = true, 
+    ["STEAM_0:0:534763468"] = true, 
+    ["STEAM_0:0:4727797"] = true, 
+    ["STEAM_0:1:203904700"] = true, 
+    ["STEAM_0:0:41386936"] = true, 
+    ["STEAM_0:0:779325404"] = true,
+    ["STEAM_0:0:39774534"] = true,
+    ["STEAM_0:0:904420245"] = true, 
+    ["STEAM_0:1:547180217"] = true, 
+    ["STEAM_0:1:532170488"] = true, 
+    ["STEAM_0:1:579803502"] = true,
+    ["STEAM_0:0:621614166"] = true, 
+    ["STEAM_0:1:579307406"] = true, 
+    ["STEAM_0:0:704051703"] = true, 
+    ["STEAM_0:0:144381831"] = true, 
+    ["STEAM_0:1:513066207"] = true, 
+    ["STEAM_0:0:105213013"] = true, 
+    ["STEAM_0:0:641587985"] = true, 
+    ["STEAM_0:0:62528412"] = true, 
+    ["STEAM_0:0:195296219"] = true, 
+    ["STEAM_0:1:705841459"] = true,
+    ["STEAM_0:0:200336136"] = true, 
+    ["STEAM_0:1:587428386"] = true, 
+    ["STEAM_0:1:639100548"] = true,
+    ["STEAM_0:0:485250012"] = true, 
+    ["STEAM_0:0:42185710"] = true, 
+    ["STEAM_0:1:540519170"] = true, 
+    ["STEAM_0:1:832608163"] = true, 
+    ["STEAM_0:0:51108817"] = true,
+    ["STEAM_0:1:157029890"] = true, 
+    ["STEAM_0:1:546227826"] = true, 
+    ["STEAM_0:1:712876207"] = true, 
+    ["STEAM_0:1:593884587"] = true, 
+    ["STEAM_0:0:85931768"] = true, 
+    ["STEAM_0:1:755790469"] = true,
+    ["STEAM_0:1:713442817"] = true, 
+    ["STEAM_0:1:239993978"] = true, 
+    ["STEAM_0:0:920903890"] = true, 
+    ["STEAM_0:0:816613189"] = true,  
+    ["STEAM_0:0:421990246"] = true,  
+    ["STEAM_0:1:774602853"] = true,  
+    ["STEAM_0:1:484736827"] = true,  
+    ["STEAM_0:0:443419471"] = true, 
+    ["STEAM_0:1:577054975"] = true,  
+    ["STEAM_0:1:629293263"] = true,
+    ["STEAM_0:1:555276375"] = true,  
+    ["STEAM_0:1:585861369"] = true, 
+    ["STEAM_0:1:775979697"] = true, 
+    ["STEAM_0:1:612388155"] = true,
+    ["STEAM_0:0:569559588"] = true, 
+    ["STEAM_0:0:571089796"] = true, 
+    ["STEAM_0:1:508504180"] = true,
+    ["STEAM_0:0:541075273"] = true, 
+    ["STEAM_0:1:607870972"] = true, 
+    ["STEAM_0:1:504308746"] = true, 
+    ["STEAM_0:1:570889301"] = true, 
+    ["STEAM_0:0:601460790"] = true,
+    ["STEAM_0:0:664615776"] = true, 
+    ["STEAM_0:1:770395308"] = true, 
+    ["STEAM_0:1:165101731"] = true, 
+    ["STEAM_0:1:775416457"] = true, 
+    ["STEAM_0:1:244442659"] = true, 
+    ["STEAM_0:1:519663063"] = true, 
+    ["STEAM_0:0:164190289"] = true, 
+    ["STEAM_0:1:556253186"] = true,
+    ["STEAM_0:0:786870009"] = true, 
+    ["STEAM_0:1:784802416"] = true, 
+    ["STEAM_0:0:165421836"] = true, 
+    ["STEAM_0:0:922388644"] = true, 
+    ["STEAM_0:1:636552585"] = true, 
+    ["STEAM_0:0:674935943"] = true,
+    ["STEAM_0:1:628929307"] = true, 
+    ["STEAM_0:0:509236870"] = true, 
+    ["STEAM_0:1:853836896"] = true,
+    ["STEAM_0:1:912278580"] = true, 
+    ["STEAM_0:1:204403113"] = true, 
+    ["STEAM_0:0:596711323"] = true,
+    ["STEAM_0:0:635888330"] = true, 
+    ["STEAM_0:0:629576309"] = true,
+    ["STEAM_0:0:640858754"] = true, 
+    ["STEAM_0:0:711503752"] = true, 
+    ["STEAM_0:1:557146787"] = true, 
+    ["STEAM_0:1:815938285"] = true, 
+    ["STEAM_0:1:424647225"] = true,
+    ["STEAM_0:0:540487084"] = true, 
+    ["STEAM_0:0:568460345"] = true, 
+    ["STEAM_0:0:564544243"] = true, 
+    ["STEAM_0:1:578798068"] = true,
+    ["STEAM_0:1:846772301"] = true, 
+    ["STEAM_0:0:626409394"] = true, 
+    ["STEAM_0:1:33128632"] = true, 
+    ["STEAM_0:1:229499093"] = true, 
+    ["STEAM_0:0:874984034"] = true, 
+    ["STEAM_0:1:797496435"] = true, 
+    ["STEAM_0:0:636153158"] = true, 
+    ["STEAM_0:0:231670303"] = true, 
+    ["STEAM_0:1:836118391"] = true,
+    ["STEAM_0:0:56811722"] = true, 
+    ["STEAM_0:1:517211563"] = true, 
+    ["STEAM_0:0:633230814"] = true, 
+    ["STEAM_0:0:507509808"] = true, 
+    ["STEAM_0:1:648929572"] = true, 
+    ["STEAM_0:0:636273808"] = true,
+    ["STEAM_0:0:559068505"] = true, 
+    ["STEAM_0:1:117597227"] = true, 
+    ["STEAM_0:0:509211855"] = true, 
+    ["STEAM_0:1:778468550"] = true, 
+    ["STEAM_0:0:450705388"] = true, 
+    ["STEAM_0:1:868884361"] = true, 
+    ["STEAM_0:0:486041428"] = true, 
+    ["STEAM_0:0:714504867"] = true, 
+    ["STEAM_0:0:531426256"] = true, 
+    ["STEAM_0:1:187613416"] = true, 
+    ["STEAM_0:0:462689539"] = true, 
+    ["STEAM_0:1:192913718"] = true, 
+    ["STEAM_0:0:804267023"] = true, 
+    ["STEAM_0:1:244388356"] = true,
+    ["STEAM_0:0:605513382"] = true, 
+    ["STEAM_0:1:677960346"] = true, 
+    ["STEAM_0:1:517760046"] = true, 
+    ["STEAM_0:1:174311327"] = true, 
+    ["STEAM_0:0:756724781"] = true, 
+    ["STEAM_0:0:35717190"] = true,
+    ["STEAM_0:1:76873410"] = true, 
+    ["STEAM_0:0:712512864"] = true, 
+    ["STEAM_0:0:865451227"] = true, 
+    ["STEAM_0:1:781603244"] = true, 
+    ["STEAM_0:1:765111757"] = true, 
+    ["STEAM_0:0:151653729"] = true,
+    ["STEAM_0:1:792058179"] = true, 
+    ["STEAM_0:0:774141380"] = true,
+    ["STEAM_0:1:522611108"] = true,
+    ["STEAM_0:1:188616486"] = true,
+    ["STEAM_0:1:778586351"] = true, 
+    ["STEAM_0:1:817429243"] = true,
+    ["STEAM_0:0:775422976"] = true, 
+    ["STEAM_0:0:743578999"] = true, 
+    ["STEAM_0:1:186999125"] = true, 
+    ["STEAM_0:0:839382000"] = true, 
+    ["STEAM_0:0:631485478"] = true,
+    ["STEAM_0:1:843710495"] = true, 
+    ["STEAM_0:1:636691197"] = true, 
+    ["STEAM_0:1:649239708"] = true, 
+    ["STEAM_0:1:535964227"] = true, 
+    ["STEAM_0:1:226101328"] = true, 
+    ["STEAM_0:0:538394034"] = true, 
+    ["STEAM_0:0:135734974"] = true,
+    ["STEAM_0:0:502379199"] = true,
+    ["STEAM_0:1:149906042"] = true,
+    ["STEAM_0:0:150281729"] = true,
+    ["STEAM_0:0:626788056"] = true, 
+    ["STEAM_0:0:769459253"] = true, 
+    ["STEAM_0:0:68377468"] = true, 
+    ["STEAM_0:1:583676910"] = true, 
+    ["STEAM_0:1:579605196"] = true, 
+    ["STEAM_0:1:567384525"] = true, 
+    ["STEAM_0:0:215017624"] = true, 
+    ["STEAM_0:0:574398411"] = true, 
+    ["STEAM_0:1:525915233"] = true, 
+    ["STEAM_0:1:53555168"] = true, 
+    ["STEAM_0:1:760503879"] = true, 
+    ["STEAM_0:1:193787083"] = true,
+    ["STEAM_0:1:425150145"] = true,
+    ["STEAM_0:1:514315052"] = true,
+    ["STEAM_0:1:533247655"] = true, 
+    ["STEAM_0:1:497545627"] = true,
+    ["STEAM_0:1:564877715"] = true,
+    ["STEAM_0:1:774317159"] = true,
+    ["STEAM_0:1:780000239"] = true,
+    ["STEAM_0:0:475054153"] = true,
+    ["STEAM_0:1:774522420"] = true, 
+    ["STEAM_0:1:129017331"] = true,  
+    ["STEAM_0:1:646389338"] = true,  
+    ["STEAM_0:1:421024681"] = true,
+    ["STEAM_0:0:209746218"] = true, 
+    ["STEAM_0:0:212374353"] = true, 
+    ["STEAM_0:1:156546630"] = true, 
+    ["STEAM_0:1:737887038"] = true, 
+    ["STEAM_0:0:509725910"] = true, 
+    ["STEAM_0:1:639206089"] = true, 
+    ["STEAM_0:0:781200124"] = true, 
+    ["STEAM_0:1:50482471"] = true, 
+    ["STEAM_0:1:460011581"] = true, 
+    ["STEAM_0:0:84060435"] = true, 
+    ["STEAM_0:1:549114111"] = true, 
+    ["STEAM_0:0:171614366"] = true, 
+    ["STEAM_0:1:213591736"] = true, 
+    ["STEAM_0:0:201369258"] = true, 
+    ["STEAM_0:0:636144181"] = true,
+    ["STEAM_0:0:428575723"] = true,
+    ["STEAM_0:0:881096656"] = true,
+    ["STEAM_0:0:848703377"] = true,
+    ["STEAM_0:0:127506252"] = true, 
+    ["STEAM_0:1:418178655"] = true, 
+    ["STEAM_0:1:612009028"] = true,
+    ["STEAM_0:0:135631558"] = true, 
+    ["STEAM_0:0:912930125"] = true,  
+    ["STEAM_0:1:712220742"] = true,  
+    ["STEAM_0:1:666883711"] = true,  
+    ["STEAM_0:1:922471308"] = true,  
+    ["STEAM_0:0:223427594"] = true,
+    ["STEAM_0:0:657187892"] = true,  
+    ["STEAM_0:1:846102233"] = true,  
+    ["STEAM_0:0:91370481"] = true, 
+    ["STEAM_0:0:916551193"] = true,  
+    ["STEAM_0:1:860078324"] = true,  
+    ["STEAM_0:0:765632211"] = true,  
+    ["STEAM_0:0:539534285"] = true, 
+    ["STEAM_0:1:218419600"] = true,  
+    ["STEAM_0:1:779502874"] = true, 
+    ["STEAM_0:0:799384795"] = true, 
+    ["STEAM_0:1:833764577"] = true,
+    ["STEAM_0:0:582141084"] = true,
+    ["STEAM_0:0:551275401"] = true, 
+    ["STEAM_0:1:51776059"] = true,
+    ["STEAM_0:1:784159876"] = true, 
+    ["STEAM_0:1:862543822"] = true,
+    ["STEAM_0:0:513272382"] = true, 
+    ["STEAM_0:0:757793591"] = true, 
+    ["STEAM_0:0:49401058"] = true,
+    ["STEAM_0:1:853430336"] = true,                    
+    ["STEAM_0:1:644564560"] = true, 
+    ["STEAM_0:1:63306774"] = true, 
+    ["STEAM_0:0:571719635"] = true,
+    ["STEAM_0:1:439425808"] = true,
+    ["STEAM_0:1:98953571"] = true, 
+    ["STEAM_0:0:602528761"] = true, 
+    ["STEAM_0:1:90662689"] = true,
+    ["STEAM_0:1:711444991"] = true,  
+    ["STEAM_0:1:528433029"] = true, 
+    ["STEAM_0:1:93569289"] = true,
+    ["STEAM_0:1:170335505"] = true,  
+    ["STEAM_0:0:555584412"] = true,
+    ["STEAM_0:0:630922153"] = true,
+    ["STEAM_0:1:861441617"] = true,
+    ["STEAM_0:1:77141376"] = true,
+    ["STEAM_0:0:53755660"] = true,
+    ["STEAM_0:0:657187892"] = true,
+    ["STEAM_0:1:570360423"] = true,
+    ["STEAM_0:0:520369783"] = true,
+    ["STEAM_0:0:634678362"] = true,
+    ["STEAM_0:1:27075092"] = true,
+    ["STEAM_0:0:740515639"] = true,
+    ["STEAM_0:0:793121967"] = true,
+    ["STEAM_0:0:591420493"] = true,
+    ["STEAM_0:1:583113641"] = true,
+    ["STEAM_0:1:520863677"] = true,
+    ["STEAM_0:0:444264538"] = true,
+    ["STEAM_0:1:84188955"] = true,
+    ["STEAM_0:1:231434392"] = true,
+    ["STEAM_0:0:28441369"] = true,
+    ["STEAM_0:1:657938019"] = true,
+    ["STEAM_0:0:515314538"] = true,
+    ["STEAM_0:1:781644113"] = true,
+    ["STEAM_0:0:74295630"] = true,
+    ["STEAM_0:0:234031824"] = true,
+    ["STEAM_0:0:542694144"] = true,
+    ["STEAM_0:1:919919275"] = true, 
+    ["STEAM_0:1:526065628"] = true,
+    ["STEAM_0:1:836965014"] = true,
+    ["STEAM_0:1:219758362"] = true,
+    ["STEAM_0:0:777522568"] = true,
+    ["STEAM_0:0:901171679"] = true,
+    ["STEAM_0:0:495224761"] = true,
+    ["STEAM_0:0:919759762"] = true,
+    ["STEAM_0:1:919928730"] = true,
+    ["STEAM_0:0:586663622"] = true,
+    ["STEAM_0:0:549625209"] = true, 
+    ["STEAM_0:1:432855707"] = true,
+    ["STEAM_0:0:586678919"] = true,
+    ["STEAM_0:1:568644289"] = true,
+    ["STEAM_0:0:540348770"] = true,
+    ["STEAM_0:1:855906142"] = true,
+    ["STEAM_0:1:495520600"] = true,
+    ["STEAM_0:1:771512939"] = true, 
+    ["STEAM_0:1:434484359"] = true, 
+    ["STEAM_0:1:455474396"] = true, 
+    ["STEAM_0:1:695198635"] = true,
+    ["STEAM_0:1:593338531"] = true,
+    ["STEAM_0:0:664957682"] = true,
+    ["STEAM_0:0:530587169"] = true,
+    ["STEAM_0:1:757969903"] = true,
+    ["STEAM_0:1:30917262"] = true,
+    ["STEAM_0:0:858769899"] = true,
+    ["STEAM_0:1:729382505"] = true,
+    ["STEAM_0:1:880863426"] = true,
+    ["STEAM_0:1:32831663"] = true,
+    ["STEAM_0:1:763930692"] = true,
+    ["STEAM_0:0:787675179"] = true,
+    ["STEAM_0:1:558686328"] = true,
+    ["STEAM_0:1:605953199"] = true,
+    ["STEAM_0:1:25194"] = true,
+    ["STEAM_0:0:926569939"] = true,
+    ["STEAM_0:0:623709208"] = true,
+    ["STEAM_0:0:780091977"] = true,
+    ["STEAM_0:0:200583762"] = true,
+    ["STEAM_0:0:205376238"] = true,  
+    ["STEAM_0:0:420254835"] = true,  
+    ["STEAM_0:1:725882394"] = true,
+    ["STEAM_0:1:798169611"] = true, 
+    ["STEAM_0:0:495860643"] = true,
+    ["STEAM_0:0:765927738"] = true,
+    ["STEAM_0:0:591418882"] = true,
+    ["STEAM_0:0:629148604"] = true,
+    ["STEAM_0:1:791197409"] = true,
+    ["STEAM_0:1:90594485"] = true,
+    ["STEAM_0:0:557428449"] = true,
+    ["STEAM_0:0:459070089"] = true,
+    ["STEAM_0:0:595115402"] = true,
+    ["STEAM_0:0:563987516"] = true,
+    ["STEAM_0:1:461981523"] = true,
+    ["STEAM_0:1:875334304"] = true,
+    ["STEAM_0:1:154576620"] = true,
+    ["STEAM_0:0:839341058"] = true,
+    ["STEAM_0:0:420045146"] = true, 
+    ["STEAM_0:1:186905963"] = true,
+    ["STEAM_0:0:785447926"] = true,
+    ["STEAM_0:1:200711382"] = true,
+    ["STEAM_0:1:627885222"] = true,
+    ["STEAM_0:0:539101555"] = true,
+    ["STEAM_0:1:525142284"] = true,
+    ["STEAM_0:1:607180975"] = true,
+    ["STEAM_0:0:150035229"] = true,
+    ["STEAM_0:1:127418290"] = true,
+    ["STEAM_0:1:439030289"] = true,
+    ["STEAM_0:1:593058511"] = true,
+    ["STEAM_0:0:817068708"] = true,
+    ["STEAM_0:0:785447926"] = true,
+    ["STEAM_0:0:520369783"] = true,   
+    ["STEAM_0:0:557428449"] = true,
+    ["STEAM_0:1:860844599"] = true,
+    ["STEAM_0:0:149023685"] = true,
+    ["STEAM_0:0:183504169"] = true,    
+    ["STEAM_0:1:18496459"] = true,
+    ["STEAM_0:0:817068708"] = true,
+    ["STEAM_0:0:915271811"] = true,
+    ["STEAM_0:0:241845755"] = true,
+    ["STEAM_0:0:130910880"] = true,
+    ["STEAM_0:1:226091576"] = true,
+    ["STEAM_0:0:104702236"] = true,
+    ["STEAM_0:1:540140220"] = true,
+    ["STEAM_0:1:526713154"] = true,
+    ["STEAM_0:0:81786806"] = true,
+    ["STEAM_0:1:847010097"] = true,
+    ["STEAM_0:0:511670197"] = true,
+    ["STEAM_0:1:859751657"] = true,
+    ["STEAM_0:0:536748292"] = true,
+    ["STEAM_0:1:601457943"] = true,
+    ["STEAM_0:1:870164545"] = true,
+    ["STEAM_0:0:568362937"] = true,
+    ["STEAM_0:1:529720142"] = true,
+    ["STEAM_0:0:924898394"] = true,
+    ["STEAM_0:0:566102944"] = true,
+    ["STEAM_0:1:863880541"] = true,
+    ["STEAM_0:0:569348968"] = true,
+    ["STEAM_0:0:569348968"] = true,
+    ["STEAM_0:0:931401417"] = true,
+    ["STEAM_0:1:709827768"] = true,
+    ["STEAM_0:0:569422843"] = true,
+    ["STEAM_0:0:741914722"] = true,
+    ["STEAM_0:0:75204909"] = true,
+    ["STEAM_0:0:779577878"] = true,
+    ["STEAM_0:1:650470689"] = true,
+    ["STEAM_0:0:830569928"] = true,
+    ["STEAM_0:0:578760519"] = true,
+    ["STEAM_0:0:492511280"] = true,
+    ["STEAM_0:0:635022953"] = true,
+    ["STEAM_0:1:584035409"] = true,
+    ["STEAM_0:1:743481318"] = true,
+    ["STEAM_0:1:519676029"] = true,
+    ["STEAM_0:0:807430647"] = true,
+    ["STEAM_0:1:462322174"] = true,
+    ["STEAM_0:0:95663991"] = true,
+    ["STEAM_0:0:798580016"] = true,
+    ["STEAM_0:1:861179470"] = true,
+    ["STEAM_0:0:755026709"] = true,
+    ["STEAM_0:1:868895683"] = true,
+    ["STEAM_0:1:555281996"] = true,
+    ["STEAM_0:1:515906715"] = true,
+    ["STEAM_0:0:104090227"] = true,
+    ["STEAM_0:1:115609036"] = true,
+    ["STEAM_0:0:555477456"] = true,
+    ["STEAM_0:1:870058984"] = true,
+    ["STEAM_0:0:918520635"] = true,
+    ["STEAM_0:0:184946154"] = true,
+    ["STEAM_0:0:151986320"] = true,
+    ["STEAM_0:1:186083776"] = true,
+    ["STEAM_0:0:132295660"] = true,
+    ["STEAM_0:0:741677848"] = true,
+    ["STEAM_0:1:462961543"] = true,
+    ["STEAM_0:0:204076914"] = true,
+    ["STEAM_0:1:587679665"] = true,
+    ["STEAM_0:0:864140194"] = true,
+    ["STEAM_0:1:608584338"] = true,
+    ["STEAM_0:1:546554251"] = true,
+    ["STEAM_0:1:191672390"] = true,
+    ["STEAM_0:0:624929397"] = true,
+    ["STEAM_0:0:933163396"] = true,
+    ["STEAM_0:1:936545957"] = true,
+    ["STEAM_0:0:113765605"] = true,
+    ["STEAM_0:1:523640224"] = true,
+    ["STEAM_0:0:507354907"] = true,
+    ["STEAM_0:1:124515142"] = true,
+    ["STEAM_0:1:193254860"] = true,
+    ["STEAM_0:0:722038990"] = true,  
+    ["STEAM_0:0:166676025"] = true,
+    ["STEAM_0:1:158504649"] = true,
+    ["STEAM_0:1:453981063"] = true,
+    ["STEAM_0:0:694647569"] = true,
+    ["STEAM_0:0:184271806"] = true,
+    ["STEAM_0:1:763453475"] = true,
+    ["STEAM_0:0:200958615"] = true,
+    ["STEAM_0:1:168826317"] = true,
+    ["STEAM_0:0:504890412"] = true,
+    ["STEAM_0:0:504890412"] = true,
+    ["STEAM_0:0:856144016"] = true,
+    ["STEAM_0:0:492588152"] = true,
+    ["STEAM_0:1:558622343"] = true,
+    ["STEAM_0:1:105489577"] = true,
+    ["STEAM_0:1:203244510"] = true,
+    ["STEAM_0:0:59454187"] = true,
+    ["STEAM_0:0:703907148"] = true,
+    ["STEAM_0:1:803668004"] = true, 
+    ["STEAM_0:0:457914866"] = true,
+    ["STEAM_0:1:103834547"] = true,
+    ["STEAM_0:1:564103660"] = true,
+    ["STEAM_0:1:506210750"] = true,
+    ["STEAM_0:0:542880793"] = true,
+    ["STEAM_0:0:457914866"] = true,
+    ["STEAM_0:1:803668004"] = true,
+    ["STEAM_0:1:810031466"] = true,
+    ["STEAM_0:1:189017573"] = true,
+    ["STEAM_0:1:32616914"] = true,
+    ["STEAM_0:0:789412369"] = true,
+    ["STEAM_0:1:562060350"] = true,
+    ["STEAM_0:0:543079075"] = true,
+    ["STEAM_0:1:944667323"] = true,
+    ["STEAM_0:0:599999607"] = true,
+    ["STEAM_0:0:690791256"] = true,
+    ["STEAM_0:0:484918447"] = true,
+    ["STEAM_0:1:600334345"] = true,
+    ["STEAM_0:1:189126659"] = true,
+    ["STEAM_0:0:547447446"] = true,
+    ["STEAM_0:0:204833828"] = true,
+    ["STEAM_0:1:792884581"] = true,
+    ["STEAM_0:0:507900653"] = true,
+    ["STEAM_0:1:180893359"] = true,
+    ["STEAM_0:0:520483191"] = true,
+    ["STEAM_0:1:922061635"] = true,
+    ["STEAM_0:1:852756722"] = true,
+    ["STEAM_0:1:439011181"] = true,
+    ["STEAM_0:1:579458160"] = true,
+    ["STEAM_0:1:942875026"] = true,
+    ["STEAM_0:0:418093452"] = true,
+    ["STEAM_0:0:721334581"] = true,
+    ["STEAM_0:0:534684252"] = true,
+    ["STEAM_0:1:929864360"] = true,
+    ["STEAM_0:0:201018665"] = true,
+    ["STEAM_0:1:920904568"] = true,
+    ["STEAM_0:1:782982347"] = true,
+    ["STEAM_0:1:461536897"] = true,
+    ["STEAM_0:1:508128944"] = true, 
+    ["STEAM_0:1:603798141"] = true,
+    ["STEAM_0:1:197292451"] = true,
+    ["STEAM_0:0:641212780"] = true,
+    ["STEAM_0:1:818565307"] = true,
+    ["STEAM_0:0:753488600"] = true,
+    ["STEAM_1:1:936208505"] = true,
+    ["STEAM_1:1:884357560"] = true,
+    ["STEAM_1:0:922239105"] = true,
+    ["STEAM_1:0:214166591"] = true,
+    ["STEAM_1:1:721991989"] = true,
+    ["STEAM_1:0:808841060"] = true,
+    ["STEAM_1:0:79017947"] = true,
+    ["STEAM_1:1:549804715"] = true,
+    ["STEAM_0:0:939155025"] = true,
+    ["STEAM_0:0:866757991"] = true,
+    ["STEAM_0:0:775986659"] = true,
+    ["STEAM_0:1:816249907"] = true,
+    ["STEAM_0:0:945022645"] = true,
+    ["STEAM_0:1:876160217"] = true,
+    ["STEAM_0:0:700923507"] = true,
+    ["STEAM_0:0:944865252"] = true,
+    ["STEAM_0:0:852177142"] = true,
+    ["STEAM_0:1:859083547"] = true,
+    ["STEAM_0:1:547873004"] = true,
+    ["STEAM_0:1:450637180"] = true,
+    ["STEAM_0:1:793273845"] = true,
+    ["STEAM_0:0:594169301"] = true,
+    ["STEAM_0:1:778589700"] = true,
+    ["STEAM_0:0:555171001"] = true,
+    ["STEAM_0:1:29010309 "] = true,
+    ["STEAM_0:0:733704815"] = true,
+    ["STEAM_0:0:90828257"] = true,
+    ["STEAM_0:1:87011806"] = true,
+    ["STEAM_0:1:444806615"] = true,
+    ["STEAM_0:0:635379702"] = true,
+    ["STEAM_0:1:503016806"] = true,
+    ["STEAM_0:1:553151280"] = true,
+    ["STEAM_0:0:709634922"] = true,
+    ["STEAM_0:0:95680184"] = true,
+    ["STEAM_0:0:465817063"] = true,
+    ["STEAM_0:1:789374585"] = true,
+    ["STEAM_0:1:912314120"] = true,
+    ["STEAM_0:0:921732035"] = true,
+    ["STEAM_0:1:521115009"] = true,
+    ["STEAM_0:1:437305415"] = true,
+    ["STEAM_0:0:420386790"] = true,
+    ["STEAM_0:0:854044409"] = true,
+    ["STEAM_0:1:160968120"] = true,
+    ["STEAM_0:1:768247177"] = true,
+    ["STEAM_0:1:221743542"] = true,
+    ["STEAM_0:0:538212720"] = true,
+    ["STEAM_0:1:551725832"] = true,
+    ["STEAM_0:0:556466396"] = true,
+    ["STEAM_0:0:77760461"] = true,
+    ["STEAM_0:1:912314120"] = true,
+    ["STEAM_0:1:220263464"] = true,
+    ["STEAM_0:0:947360651"] = true,
+    ["STEAM_0:1:162263841"] = true,
+    ["STEAM_0:1:2274502"] = true,
+    ["STEAM_0:0:428898435"] = true,
+    ["STEAM_0:1:586292106"] = true,
+    ["STEAM_0:1:448982070"] = true, 
+    ["STEAM_0:0:887428339"] = true,
+    ["STEAM_0:0:947422068"] = true,
+    ["STEAM_0:0:116003133"] = true,
+    ["STEAM_1:0:817429243"] = true,
+    ["STEAM_0:1:118223185"] = true,
+    ["STEAM_0:1:539082277"] = true,
+    ["STEAM_0:0:555181600"] = true,
+    ["STEAM_0:1:920399498"] = true,
+    ["STEAM_0:1:745830085"] = true,
+    ["STEAM_0:0:552314562"] = true,
+    ["STEAM_0:0:585514744"] = true,
+    ["STEAM_0:0:816194621"] = true,
+    ["STEAM_0:1:591337701"] = true,
+    ["STEAM_0:1:777915991"] = true,
+    ["STEAM_0:0:63826996"] = true,
+    ["STEAM_0:1:511090883"] = true,
+    ["STEAM_0:0:524186698"] = true,
+    ["STEAM_0:0:45561379"] = true,
+    ["STEAM_0:1:899972340"] = true,
+    ["STEAM_0:0:452950093"] = true,
+    ["STEAM_0:1:520087429"] = true,
+    ["STEAM_0:0:185449352"] = true,
+    ["STEAM_0:1:796808901"] = true,
+    ["STEAM_0:0:737318455"] = true,
+    ["STEAM_0:0:838501860"] = true,
+    ["STEAM_0:0:840179637"] = true,
+    ["STEAM_0:0:722965474"] = true,
+    ["STEAM_0:1:868912570"] = true,
+    ["STEAM_0:0:628154972"] = true,
+    ["STEAM_0:1:808289897"] = true,
+    ["STEAM_0:1:1058595"] = true,
+    ["STEAM_0:1:570496513"] = true,
+    ["STEAM_0:1:599567902"] = true,
+    ["STEAM_0:1:454644559"] = true,
+    ["STEAM_0:0:191754705"] = true,
+    ["STEAM_0:0:898970135"] = true,
+    ["STEAM_0:1:771936882"] = true,
+    ["STEAM_0:0:497571103"] = true,
+    ["STEAM_0:1:939582318"] = true,
+    ["STEAM_0:1:46342874"] = true,
+    ["STEAM_0:1:562337802"] = true,
+    ["STEAM_0:0:618714199"] = true,
+    ["STEAM_0:1:863512620"] = true,
+    ["STEAM_0:0:774141380"] = true,
+    ["STEAM_0:0:917689761"] = true,
+    ["STEAM_0:1:591713904"] = true,
+    ["STEAM_0:0:890014793"] = true,
+    ["STEAM_0:0:713675235"] = true,
+    ["STEAM_0:1:621641466"] = true,
+    ["STEAM_0:1:95196227"] = true,
+    ["STEAM_0:0:794694761"] = true,
+    ["STEAM_0:0:3127626"] = true,
+    ["STEAM_0:0:913766304"] = true,
+    ["STEAM_0:1:224598890"] = true,
+    ["STEAM_0:0:580592536"] = true,
+    ["STEAM_0:1:30151182"] = true,
+    ["STEAM_0:1:703906403"] = true,
+    ["STEAM_0:1:876160217"] = true,
+    ["STEAM_0:0:948412435"] = true,
+    ["STEAM_0:1:721208596"] = true,
+    ["STEAM_0:1:740792720"] = true,
+    ["STEAM_0:1:95196227"] = true,
+    ["STEAM_0:1:224598890"] = true,
+    ["STEAM_0:1:621641466"] = true,
+    ["STEAM_0:1:546597457"] = true,
+    ["STEAM_0:1:11539441"] = true,
+    ["STEAM_0:1:504644783"] = true,
+    ["STEAM_0:1:124161389"] = true,
+    ["STEAM_0:1:722763526"] = true,
+    ["STEAM_0:1:788848746"] = true,
+    ["STEAM_0:1:789877432"] = true,
+    ["STEAM_0:1:709342764"] = true,
+    ["STEAM_0:0:717919337"] = true,
+    ["STEAM_0:0:920153475"] = true,
+    ["STEAM_0:0:611509151"] = true,
+    ["STEAM_0:1:949867613"] = true,
+    ["STEAM_0:0:633017652"] = true,
+    ["STEAM_0:1:34279496"] = true,
+    ["STEAM_0:1:628545106"] = true,
+    ["STEAM_0:1:770019410"] = true,
+    ["STEAM_0:0:659353483"] = true,
+    ["STEAM_0:1:717665116"] = true,
+    ["STEAM_0:0:530810595"] = true,
+    ["STEAM_0:1:743575197"] = true,
+    ["STEAM_0:1:624952386"] = true,
+    ["STEAM_0:0:765176209"] = true,
+    ["STEAM_0:1:104859112"] = true,
+    ["STEAM_0:0:927114246"] = true,
+    ["STEAM_1:0:741942042"] = true,
+    ["STEAM_0:1:82141713"] = true,
+    ["STEAM_0:1:876703593"] = true,
+    ["STEAM_0:0:741942042"] = true,
+    ["STEAM_0:1:429692806"] = true,
+    ["STEAM_0:1:92343765"] = true,
+    ["STEAM_0:0:550032644"] = true,
+    ["STEAM_0:1:161463867"] = true,
+    ["STEAM_0:1:532020296"] = true,
+    ["STEAM_0:0:799753225"] = true,
+    ["STEAM_0:1:922146713"] = true,
+    ["STEAM_0:0:552533078"] = true,
+    ["STEAM_0:1:648251785"] = true,
+    ["STEAM_0:0:149585396"] = true,
+    ["STEAM_0:1:839717091"] = true,
+    ["STEAM_0:0:737984190"] = true,
+    ["STEAM_0:1:648251785"] = true,
+    ["STEAM_0:1:572225163"] = true,
+    ["STEAM_0:0:780307387"] = true,
+    ["STEAM_0:1:648251785"] = true,
+    ["STEAM_0:0:625005878"] = true,
+    ["STEAM_0:0:149585396"] = true,
+    ["STEAM_0:1:839717091"] = true,
+    ["STEAM_0:0:737984190"] = true,
+    ["STEAM_0:1:518761660"] = true,
+    ["STEAM_0:0:524089364"] = true,
+    ["STEAM_0:1:570984315"] = true,
+    ["STEAM_0:1:635535744"] = true,
+    ["STEAM_0:1:623285780"] = true,
+    ["STEAM_0:0:833337658"] = true,
+    ["STEAM_0:1:218965416"] = true,
+    ["STEAM_0:1:105646017"] = true,
+    ["STEAM_0:1:117878305"] = true,
+    ["STEAM_0:0:515340292"] = true,
+    ["STEAM_0:0:435756603"] = true,
+    ["STEAM_0:1:79576718"] = true,
+    ["STEAM_0:1:211976613"] = true,
+    ["STEAM_0:1:713329250"] = true,
+    ["STEAM_0:0:567986646"] = true,
+    ["STEAM_0:1:151183997"] = true,
+    ["STEAM_0:0:563142577"] = true,
+    ["STEAM_0:1:430035016"] = true,
+    ["STEAM_0:0:895015374"] = true,
+    ["STEAM_0:0:551379648"] = true,
+    ["STEAM_0:0:847972216"] = true,
+    ["STEAM_0:0:656073323"] = true,
+    ["STEAM_0:0:43451635"] = true,
+    ["STEAM_0:0:641897240"] = true,
+    ["STEAM_0:1:928995382"] = true,
+    ["STEAM_0:0:598802172"] = true,
+    ["STEAM_0:0:945170348"] = true,
+    ["STEAM_0:1:458398992"] = true,
+    ["STEAM_0:1:670282933"] = true,
+    ["STEAM_0:1:517281045"] = true,
+    ["STEAM_0:1:419360020"] = true,
+    ["STEAM_0:0:813085378"] = true,
+    ["STEAM_0:1:442827682"] = true,
+    ["STEAM_0:0:454873017"] = true,
+    ["STEAM_0:0:709080985"] = true,
+    ["STEAM_0:1:555638706"] = true,
+    ["STEAM_0:0:906074941"] = true,
+    ["STEAM_0:1:892056836"] = true,
+    ["STEAM_0:1:806976483"] = true,
+    ["STEAM_0:0:592085439"] = true,
+    ["STEAM_0:1:797651822"] = true,
+    ["STEAM_0:1:52645859"] = true,
+    ["STEAM_0:1:80152440"] = true,
+    ["STEAM_0:1:544500372"] = true,
+    ["STEAM_0:1:772772091"] = true,
+    ["STEAM_0:1:121782969"] = true,
+    ["STEAM_0:1:772772091"] = true,
+    ["STEAM_0:1:121782969"] = true,
+    ["STEAM_0:1:564606135"] = true,
+    ["STEAM_0:1:825715754"] = true,
+    ["STEAM_0:1:571270369"] = true,
+    ["STEAM_0:0:657007399"] = true,
+    ["STEAM_0:1:837414887"] = true,
+    ["STEAM_0:0:728581580"] = true,
+    ["STEAM_0:1:543047025"] = true,
+    ["STEAM_0:1:12768375"] = true,
+    ["STEAM_0:0:454750318"] = true,
+    ["STEAM_0:1:634990044"] = true,
+    ["STEAM_0:1:176015835"] = true,
+    ["STEAM_0:0:192102037"] = true,
+    ["STEAM_0:1:555656687"] = true,
+    ["STEAM_0:0:797978620"] = true,
+    ["STEAM_0:0:148912316"] = true,
+    ["STEAM_0:1:865284504"] = true,
+    ["STEAM_0:1:163549246"] = true,
+    ["STEAM_0:1:765026908"] = true,
+    ["STEAM_0:1:544346420"] = true,
+    ["STEAM_0:0:934907081"] = true,
+    ["STEAM_0:0:636128933"] = true,
+    ["STEAM_0:0:443315757"] = true,
+    ["STEAM_0:1:927288805"] = true,
+    ["STEAM_0:1:927465431"] = true,
+    ["STEAM_0:1:422433133"] = true,
+    ["STEAM_0:0:743213338"] = true,
+    ["STEAM_0:0:642238857"] = true,
+    ["STEAM_0:1:753731692"] = true,
+    ["STEAM_0:0:569650994"] = true,
+    ["STEAM_0:0:87994335"] = true,
+    ["STEAM_0:0:850805133"] = true,
+    ["STEAM_0:1:762680554"] = true,
+    ["STEAM_0:0:567188921"] = true,
+    ["STEAM_0:0:536998053"] = true,
+    ["STEAM_0:1:783401400"] = true,
+    ["STEAM_0:1:16749755"] = true,
+    ["STEAM_0:1:807348073"] = true,
+    ["STEAM_0:0:854901979"] = true,
+    ["STEAM_0:1:523131808"] = true,
+    ["STEAM_0:0:894312289"] = true,
+    ["STEAM_0:1:761473340"] = true,
+    ["STEAM_0:0:527704999"] = true,
+    ["STEAM_0:0:672672217"] = true,
+    ["STEAM_0:1:922319536"] = true,
+    ["STEAM_0:1:753651797"] = true,
+    ["STEAM_0:1:884116288"] = true,
+    ["STEAM_0:0:769668722"] = true,
+    ["STEAM_0:0:785086074"] = true,
+    ["STEAM_0:1:180302600"] = true,
+    ["STEAM_0:1:514155057"] = true,
+    ["STEAM_0:0:449997691"] = true,
+    ["STEAM_0:0:615140146"] = true,
+    ["STEAM_0:0:198542759"] = true,
+    ["STEAM_0:1:785527959"] = true,
+    ["STEAM_0:1:781429712"] = true,
+    ["STEAM_0:0:628648805"] = true,
+    ["STEAM_0:1:939065257"] = true,
+    ["STEAM_0:1:918574347"] = true,
+    ["STEAM_0:0:610126456"] = true,
+    ["STEAM_0:0:558233996"] = true,
+    ["STEAM_0:0:842674206"] = true,
+    ["STEAM_0:0:841231319"] = true,
+    ["STEAM_0:1:119115259"] = true,
+    ["STEAM_0:1:765877069"] = true,
+    ["STEAM_0:0:84413404"] = true,
+    ["STEAM_0:0:59012257"] = true,
+    ["STEAM_0:1:770162126"] = true,
+    ["STEAM_0:0:441357711"] = true,
+    ["STEAM_0:0:851902288"] = true,
+    ["STEAM_0:0:457589993"] = true,
+    ["STEAM_0:0:543276016"] = true,
+    ["STEAM_0:0:606802913"] = true,
+    ["STEAM_0:0:800850358"] = true,
+    ["STEAM_0:1:852465095"] = true,
+    ["STEAM_0:0:431143642"] = true,
+    ["STEAM_0:0:955198948"] = true,
+    ["STEAM_0:0:948497693"] = true,
+    ["STEAM_0:0:445214660"] = true,
+    ["STEAM_0:1:603846931"] = true,
+    ["STEAM_0:1:948925129"] = true,
+    ["STEAM_0:1:731071929"] = true,
+    ["STEAM_0:0:45255855"] = true,
+    ["STEAM_0:1:553897769"] = true,
+    ["STEAM_0:0:920928206"] = true,
+    ["STEAM_0:0:172562376"] = true,
+    ["STEAM_0:1:762252049"] = true,
+    ["STEAM_0:1:544346420"] = true,
+    ["STEAM_0:0:853723114"] = true,
+    ["STEAM_0:0:613400749"] = true,
+    ["STEAM_0:0:783022886"] = true
+}
 
+hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
+    
+end)
+
+hook.Add("PlayerInitialSpawn", "Ultimate_TrackPlayerInitialSpawn", function(ply)
+    timer.Simple(2, function()
+        if not IsValid(ply) then return end
+        local sid = ply:SteamID()       
+        if ultimate.trackedPlayers[sid] then
+            chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
+                Color(255, 0, 0), "Клеймо под именем ",
+                Color(0, 0, 0), ply:Nick() .. " z",
+                Color(255, 255, 255), " зашло на сервер.")
+        end
+    end)
+end)
+
+hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
+    if not IsValid(ent) or not ent:IsPlayer() then return end
+    local sid = ent:SteamID()
+    if ultimate.trackedPlayers[sid] then
+        chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
+             Color(255, 255, 255), ply:Nick() .. " rq")
+    end
+end)
+
+
+
+timer.Simple(5, function()
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsValid(ply) then continue end
+        local sid = ply:SteamID()
+        if ultimate.trackedPlayers[sid] then
+            chat.AddText(Color(255, 200, 0), "[Protogen.sex] ",
+                Color(255, 255, 255), ply:Nick() .. " уже на сервере!")
+        end
+    end
+end)
