@@ -4374,7 +4374,7 @@ end
 ultimate.CustomSpread = {}
 
 function ultimate.CustomSpread.swb( cmd, ang )
-    
+    /*
     local vel = pLocalPlayer:GetVelocity():Length()
     local dir = ang:Forward()
     
@@ -4409,7 +4409,7 @@ function ultimate.CustomSpread.swb( cmd, ang )
         ultimate.activeWeapon.AddSpread = math.Clamp( ultimate.activeWeapon.AddSpread - 0.005 * ultimate.activeWeapon.AddSpreadSpeed, 0, ultimate.activeWeapon.MaxSpreadInc )
         ultimate.activeWeapon.AddSpreadSpeed = math.Clamp( ultimate.activeWeapon.AddSpreadSpeed + 0.05, 0, 1 )
     end
-    
+    */
 
     local cone = ultimate.activeWeapon.CurCone
     if !cone then return ang end
