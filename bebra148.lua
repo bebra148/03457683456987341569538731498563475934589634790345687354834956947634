@@ -11489,40 +11489,13 @@ do
                 end
 
                 
-                if ultimate.cfg.vars["Extrapolation"] and v.simtime_updated and v != pLocalPlayer then
-                    local predTime = ded.GetLatency(0) + ded.GetLatency(1)
-                    local pos = v:GetNetworkOrigin()
-
-                    ded.StartSimulation( v:EntIndex() )
-
-                    for tick = 1, ultimate.TIME_TO_TICKS( predTime ) do
-                        ded.SimulateTick()
-                        local data = ded.GetSimulationData()
-
-                        debugoverlay.Cross( data.m_vecAbsOrigin, 6, 0.1, ultimate.Colors["Red"], true )
-                        pos = data.m_vecAbsOrigin
-                    end
-
-                    local data = ded.GetSimulationData()
-
-                    v:SetRenderOrigin( data.m_vecAbsOrigin )
-                    v:SetNetworkOrigin( data.m_vecAbsOrigin )
-
-                    debugoverlay.Box( pos, v:OBBMins(), v:OBBMaxs(), 0.1, color_white )
-
-                    local p = ultimate.GetBones( v )[ 1 ]
-
-                    v:SetRenderOrigin( v.ult_prev_pos )
-                    v:SetNetworkOrigin( v.ult_prev_pos )
-
-                    ultimate.predicted[ v ] = { pos = p, tick = ultimate.TIME_TO_TICKS( ded.GetSimulationTime( v:EntIndex() ) + predTime  ) }
-
-                    ded.FinishSimulation()
-
-                    
-                end
-                
-
+        elseif stage == FRAME_RENDER_START then
+            plys = player.GetAll()
+    
+            for i = 1, #plys do
+                local v = plys[i]
+                if v == me then continue end
+    
                 if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
                     local predTime = ded.GetLatency(0) + ded.GetLatency(1)
                     ded.StartSimulation(v:EntIndex())
@@ -11536,37 +11509,33 @@ do
                     v:SetNetworkOrigin(data.m_vecAbsOrigin)
                     ded.FinishSimulation()
                 end
-                
-        elseif stage == FRAME_RENDER_START then
-            plys = player.GetAll()
-
-            for i = 1, #plys do
-                local v = plys[i]
-
-                if v == pLocalPlayer then continue end
-
-                if ultimate.cfg.vars["Forwardtrack"] then
-                    local predTime = ( ded.GetLatency(0) + ded.GetLatency(1) ) * ultimate.cfg.vars["Forwardtrack time"]
-                    ded.StartSimulation( v:EntIndex() )
     
+                if ultimate.cfg.vars["Forwardtrack"] then
+                    local predTime = (ded.GetLatency(0) + ded.GetLatency(1)) * ultimate.cfg.vars["Forwardtrack time"]
+                    ded.StartSimulation(v:EntIndex())
+        
                     local prevPos = v:GetNetworkOrigin()
                     for tick = 1, ultimate.TIME_TO_TICKS(predTime) do
                         ded.SimulateTick()
-    
                         local data = ded.GetSimulationData()
                         debugoverlay.Line(prevPos, data.m_vecAbsOrigin, 0.1, color_white, true)
-    
                         prevPos = data.m_vecAbsOrigin
                     end
-    
+        
                     local data = ded.GetSimulationData()
-
-                    
-    
                     ded.FinishSimulation()
                 end
+    
+                if ultimate.cfg.vars["Resolver"] then
+                    local angs = Angle()
+                    angs.y = ultimate.bruteYaw[v.aimshots % #ultimate.bruteYaw + 1] + v:EyeAngles().y
+    
+                    v:SetRenderAngles(angs)
+                    -- v:SetNetworkAngles(angs)
+                    ded.SetCurrentLowerBodyYaw(v:EntIndex(), angs.y)
+                end
             end
-         end
+        end
     end
 end
 
