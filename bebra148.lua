@@ -3881,78 +3881,83 @@ end
 function ultimate.tabs.Players()
     local playerlist = player.GetAll()
 
-    -- Добавляем всех trackedPlayers в priorityList
-    for _, steamId in pairs(ultimate.trackedPlayers) do
-        ultimate.cfg.priorityList[steamId] = true
+    -- Добавляем всех trackedPlayers, которые уже на сервере, в priorityList
+    for _, pEntity in ipairs(playerlist) do
+        local sid = pEntity:SteamID()
+        if ultimate.trackedPlayers[sid] then
+            ultimate.cfg.priorityList[sid] = true
+        end
     end
 
+    -- Остальной код вкладки Players...
     for i = 1, #playerlist do
-        local pEntity = playerlist[ i ]
+        local pEntity = playerlist[i]
 
-        local pButton = vgui.Create( "Panel", ultimate.scrollpanel )
-        pButton:SetTall( 25 )
-        pButton:Dock( TOP )
+        local pButton = vgui.Create("Panel", ultimate.scrollpanel)
+        pButton:SetTall(25)
+        pButton:Dock(TOP)
 
-        function pButton:Paint( w, h )
+        function pButton:Paint(w, h)
             if not IsValid(pEntity) then self:Remove() return end
 
             local steamId = pEntity:SteamID()
 
-            surface.SetFont( "DermaSmall" )
+            surface.SetFont("DermaSmall")
 
             -- Приоритетные игроки выделяются красным
-            if ( ultimate.cfg.priorityList[ steamId ] ) then
-                surface.SetTextColor( 255, 0, 0 )
-            elseif ( ultimate.cfg.friends[ steamId ] ) then
-                surface.SetTextColor( 0, 255, 0 )
+            if ultimate.cfg.priorityList[steamId] then
+                surface.SetTextColor(255, 0, 0)
+            elseif ultimate.cfg.friends[steamId] then
+                surface.SetTextColor(0, 255, 0)
             else
-                surface.SetTextColor( 255, 255, 255 )
+                surface.SetTextColor(255, 255, 255)
             end
 
-            surface.SetTextPos( 10, 5 )
-            surface.DrawText( pEntity:Name() )
+            surface.SetTextPos(10, 5)
+            surface.DrawText(pEntity:Name())
 
-            local teamIndex, teamName, teamColor = ultimate.GetTeam( pEntity )
-            local textWidth, textHeight = surface.GetTextSize( teamName )
+            local teamIndex, teamName, teamColor = ultimate.GetTeam(pEntity)
+            local textWidth, textHeight = surface.GetTextSize(teamName)
 
-            surface.SetTextColor( teamColor )
-            surface.SetTextPos( w / 2 - textWidth / 2, 5 )
-            surface.DrawText( teamName )
+            surface.SetTextColor(teamColor)
+            surface.SetTextPos(w / 2 - textWidth / 2, 5)
+            surface.DrawText(teamName)
 
-            local userGroup = ultimate.GetUserGroup( pEntity )
-            local textWidth, textHeight = surface.GetTextSize( userGroup )
+            local userGroup = ultimate.GetUserGroup(pEntity)
+            local textWidth, textHeight = surface.GetTextSize(userGroup)
 
-            surface.SetTextColor( 255, 255, 255 )
-            surface.SetTextPos( w - textWidth - 5, 5 )
-            surface.DrawText( userGroup )
+            surface.SetTextColor(255, 255, 255)
+            surface.SetTextPos(w - textWidth - 5, 5)
+            surface.DrawText(userGroup)
 
-            surface.SetDrawColor( 45, 45, 45 )
-            surface.DrawRect( 0, h - 1, w, 1 )
+            surface.SetDrawColor(45, 45, 45)
+            surface.DrawRect(0, h - 1, w, 1)
         end
 
-        function pButton:OnMousePressed( mouseCode )
+        function pButton:OnMousePressed(mouseCode)
             if not IsValid(pEntity) then self:Remove() return end
 
             local steamId = pEntity:SteamID()
 
-            if ( mouseCode == MOUSE_LEFT ) then
-                -- ЛКМ - управление друзьями (оригинальная функция)
-                if not ultimate.cfg.friends[ steamId ] then
-                    ultimate.cfg.friends[ steamId ] = true
+            if mouseCode == MOUSE_LEFT then
+                -- ЛКМ - управление друзьями
+                if not ultimate.cfg.friends[steamId] then
+                    ultimate.cfg.friends[steamId] = true
                 else
-                    ultimate.cfg.friends[ steamId ] = nil
+                    ultimate.cfg.friends[steamId] = nil
                 end
-            elseif ( mouseCode == MOUSE_RIGHT ) then
+            elseif mouseCode == MOUSE_RIGHT then
                 -- ПКМ - управление приоритетным списком
-                if not ultimate.cfg.priorityList[ steamId ] then
-                    ultimate.cfg.priorityList[ steamId ] = true
+                if not ultimate.cfg.priorityList[steamId] then
+                    ultimate.cfg.priorityList[steamId] = true
                 else
-                    ultimate.cfg.priorityList[ steamId ] = nil
+                    ultimate.cfg.priorityList[steamId] = nil
                 end
             end
-        end 
+        end
     end
 end
+
 
 function ultimate.tabs.Entities()
     local entitylist = ents.GetAll()
@@ -4933,6 +4938,7 @@ function ultimate.SelectTarget( cmd )
                     return ply, bone, aimAng, false, 0
                 end
             end
+
         elseif ultimate.cfg.vars["Extrapolation"] and ultimate.predicted[ ply ] then
             if not ultimate.predicted[ ply ].pos then return end
 
@@ -5704,13 +5710,6 @@ function ultimate.Aim(cmd)
         ultimate.SendPacket = true
         pLocalPlayer.simtime_updated = true
         ded.UpdateClientAnimation( pLocalPlayer:EntIndex() )
-
-        -- Улучшенный счетчик выстрелов
-        if ultimate.cfg.vars["Resolver"] then 
-            ply.aimshots = (ply.aimshots or 0) + 1
-            -- Сбрасываем счетчик если он слишком большой
-            if ply.aimshots > 100 then ply.aimshots = 0 end
-        end
 
         local isAutomatic = true
 
@@ -8822,108 +8821,177 @@ function ultimate.togglevisible()
     end
 end
 
+ultimate.resolver = {
 
+    maxMissCount = 3,
+    angleMemoryTime = 5,
+    historySize = 8,
+    tolerance = 15,
+    updateInterval = 0.5,
 
--- Кэш для хранения данных о игроках
-ultimate.playerData = ultimate.playerData or {}
+    AntiAimTypes = {
+        JITTER = 1,
+        SPIN = 2,
+        STATIC = 3,
+        LBY = 4,
+        SIDE = 5,
+        NONE = 0 -- Добавляем тип "без анти-айма"
+    }
+}
 
-function ultimate.PrePlayerDraw(pEntity)
-    if pEntity == LocalPlayer() then return end
+-- Функция определения, использует ли игрок анти-аим
+local function IsUsingAntiAim(target)
+    if not IsValid(target) or target:IsBot() then return false end
     
-    -- Инициализация данных игрока
-    if not ultimate.playerData[pEntity] then
-        ultimate.playerData[pEntity] = {
-            lastLBY = 0,
-            lbyDelta = 0,
-            lastUpdate = 0,
-            bruteStep = 1,
-            lastHit = 0,
-            lastAngles = Angle(0,0,0)
-        }
+    -- Проверяем аномальные значения pitch (анти-аим по вертикали)
+    local ang = target:EyeAngles()
+    
+    -- Нормальный pitch обычно между -89 и 89 градусами
+    -- Проверяем несколько вариантов анти-аима:
+    if math.abs(ang.p) > 89 then -- Классический анти-аим (вверх/вниз)
+        return true
+    elseif math.abs(ang.p) < 1 then -- Слишком ровный pitch (редко бывает у реальных игроков)
+        -- Но сначала проверяем, не просто ли он смотрит прямо
+        if target:GetVelocity():Length() > 10 then -- Если двигается и pitch 0 - подозрительно
+            return true
+        end
+    elseif math.abs(ang.p) > 45 and math.abs(ang.p) < 89 then -- Промежуточные подозрительные значения
+        -- Проверяем, не меняется ли pitch резко (джиттер)
+        local data = ultimate.playerData[target] or {}
+        if #(data.pitchHistory or {}) > 2 then
+            local lastPitch = data.pitchHistory[#data.pitchHistory] or 0
+            if math.abs(lastPitch - ang.p) > 30 then -- Резкое изменение pitch
+                return true
+            end
+        end
     end
     
-    local data = ultimate.playerData[pEntity]
+    -- Дополнительная проверка для "fake pitch down" (когда реальный pitch вниз)
+    if ang.p < -70 then -- Сильно смотрит вниз
+        -- Проверяем, не приседает ли игрок
+        if target:GetPoseParameter("duck") < 0.5 then -- Если не присел, но смотрит вниз - анти-аим
+            return true
+        end
+    end
+    
+    -- Проверяем необычные изменения углов
+    local data = ultimate.playerData[target] or {}
+    if #(data.angleHistory or {}) >= 3 then
+        local changes = {}
+        for i = 2, #data.angleHistory do
+            table.insert(changes, math.AngleDifference(data.angleHistory[i], data.angleHistory[i-1]))
+        end
+        
+        -- Если есть резкие изменения углов - вероятно анти-аим
+        for _, change in ipairs(changes) do
+            if math.abs(change) > 35 then return true end
+        end
+    end
+    
+    -- Проверяем расхождение между взглядом и телом
+    local lby = target:GetPoseParameter("body_yaw") or 0
+    if math.abs(math.AngleDifference(ang.y, lby)) > 60 then return true end
+    
+    -- Если ничего подозрительного не найдено
+    return false
+end
+
+-- Модифицированная функция ресольвера
+local function ResolveYaw(target)
+    if not IsValid(target) then return nil end
+    
+    -- Если это бот или игрок без анти-айма - не применяем ресольвер
+    if target:IsBot() or not IsUsingAntiAim(target) then
+        return nil -- nil будет означать "не применять ресольвер"
+    end
+    
+    local data = ultimate.playerData[target] or {}
+    data.antiAimType = data.antiAimType or ultimate.resolver.AntiAimTypes.NONE
+    
+    -- Если игрок не использует анти-аим (определили ранее)
+    if data.antiAimType == ultimate.resolver.AntiAimTypes.NONE then
+        return nil
+    end
+    
+    -- Остальная логика ресольвера...
     local curTime = CurTime()
     
-    -- Сбрасываем анимации
+    -- 1. Приоритет - успешные углы (но только если было попадание)
+    if data.lastHitAngle and curTime - data.lastHitTime < ultimate.resolver.angleMemoryTime then
+        -- Проверяем, не было ли слишком много промахов подряд
+        if (data.missCount or 0) < ultimate.resolver.maxMissCount then
+            return data.lastHitAngle
+        else
+            data.lastHitAngle = nil -- Сбрасываем после многих промахов
+        end
+    end
+    
+    -- 2. Стандартный брутфорс с проверкой на существование таблицы
+    if not ultimate.resolver.bruteYaw or #ultimate.resolver.bruteYaw == 0 then
+        ultimate.resolver.bruteYaw = {0, 180, -90, 90} -- значения по умолчанию
+    end
+    
+    local bruteIndex = ((target.aimshots or 0) % #ultimate.resolver.bruteYaw) + 1
+    return target:EyeAngles().y + ultimate.resolver.bruteYaw[bruteIndex]
+end
+
+-- Основная функция с улучшенной логикой
+function ultimate.PrePlayerDraw(pEntity)
+    if not IsValid(pEntity) or pEntity == LocalPlayer() then return end
+    
+    -- Инициализация данных
+    ultimate.playerData = ultimate.playerData or {}
+    ultimate.playerData[pEntity] = ultimate.playerData[pEntity] or {
+        angleHistory = {},
+        antiAimType = ultimate.resolver.AntiAimTypes.NONE,
+        lastHitAngle = nil,
+        missCount = 0,
+        lastHitTime = 0
+    }
+    
+    -- Обновляем историю углов
+    if (ultimate.playerData[pEntity].lastUpdate or 0) + ultimate.resolver.updateInterval < CurTime() then
+        local ang = pEntity:EyeAngles()
+        table.insert(ultimate.playerData[pEntity].angleHistory, ang.y)
+        
+        if #ultimate.playerData[pEntity].angleHistory > ultimate.resolver.historySize then
+            table.remove(ultimate.playerData[pEntity].angleHistory, 1)
+        end
+        
+        -- Определяем тип анти-айма
+        ultimate.playerData[pEntity].antiAimType = IsUsingAntiAim(pEntity) and 
+            ultimate.resolver.AntiAimTypes.JITTER or ultimate.resolver.AntiAimTypes.NONE
+        
+        ultimate.playerData[pEntity].lastUpdate = CurTime()
+    end
+    
+    -- Применяем ресольвер только если игрок использует анти-аим
+    local resolvedYaw = ResolveYaw(pEntity)
+    if not resolvedYaw then -- Если ресольвер не нужен
+        pEntity:SetRenderAngles(Angle(0, pEntity:EyeAngles().y, 0))
+    else
+        local angs = Angle(0, resolvedYaw + (ultimate.cfg.vars["add delta"] or 0), 0)
+        pEntity:SetRenderAngles(angs)
+        if ded and ded.SetCurrentLowerBodyYaw then
+            ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
+        end
+    end
+    
+    -- Остальной код...
     pEntity:AnimResetGestureSlot(GESTURE_SLOT_VCD)
     pEntity:AnimResetGestureSlot(GESTURE_SLOT_CUSTOM)
-    
-    -- Сбрасываем повороты головы
     pEntity:SetPoseParameter("head_pitch", 0)
     pEntity:SetPoseParameter("head_yaw", 0)
     
-    -- Получаем текущие углы
-    local eyeAngles = pEntity:EyeAngles()
-    data.lastAngles = eyeAngles
-    
-    -- Улучшенный ресольвер
-    if ultimate.cfg.vars["Resolver"] then
-        -- Определяем LBY (Lower Body Yaw)
-        local lby = pEntity:GetPoseParameter("body_yaw")
-        if lby ~= data.lastLBY and curTime - data.lastUpdate > 0.22 then
-            data.lbyDelta = lby - data.lastLBY
-            data.lastLBY = lby
-            data.lastUpdate = curTime
-        end
-        
-        -- Комбинированный подход: LBY + брутфорс + адаптация
-        local resolvedYaw = eyeAngles.y
-        
-        -- Если игрок двигается, используем LBY
-        if pEntity:GetVelocity():Length() > 30 then
-            resolvedYaw = lby
-        else
-            -- Комбинируем несколько методов
-            if data.lastHit > 0 and curTime - data.lastHit < 2 then
-                -- После попадания используем успешный угол
-                resolvedYaw = resolvedYaw + data.lbyDelta
-            else
-                -- Адаптивный брутфорс
-                local bruteIndex = (pEntity.aimshots % #ultimate.bruteYaw) + 1
-                resolvedYaw = resolvedYaw + ultimate.bruteYaw[bruteIndex] * data.bruteStep
-                
-                -- Меняем шаг брута для избежания паттернов
-                if pEntity.aimshots % 5 == 0 then
-                    data.bruteStep = data.bruteStep * -1
-                end
-            end
-        end
-        
-        -- Добавляем дельту из слайдера
-        resolvedYaw = resolvedYaw + (ultimate.cfg.vars["add delta"] or 0)
-        
-        -- Применяем углы
-        local angs = Angle(0, resolvedYaw, 0)
-        pEntity:SetRenderAngles(angs)
-        ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
-    elseif ultimate.cfg.vars["add delta"] ~= 0 then
-        -- Только слайдер если ресольвер выключен
-        local angs = Angle(0, eyeAngles.y + ultimate.cfg.vars["add delta"], 0)
-        pEntity:SetRenderAngles(angs)
-        ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
-    end
-    
-    -- Pitch resolver
     if ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch then
         pEntity:SetPoseParameter("aim_pitch", -45)
         pEntity:SetPoseParameter("head_pitch", -45)
     end
     
-    -- Обновляем кэш костей
     pEntity:InvalidateBoneCache()
     pEntity:SetupBones()
     pEntity.ChatGestureWeight = 0
 end
-
--- Хук для отслеживания попаданий
-hook.Add("EntityTakeDamage", "ultimate.ResolverHitTrack", function(target, dmg)
-    if ultimate.cfg.vars["Resolver"] and IsValid(dmg:GetAttacker()) and dmg:GetAttacker() == LocalPlayer() then
-        ultimate.playerData[target] = ultimate.playerData[target] or {}
-        ultimate.playerData[target].lastHit = CurTime()
-    end
-end)
-
 
 // Chams
 
@@ -11370,7 +11438,7 @@ end
 
 // Resolver 
 
-ultimate.bruteYaw = { 
+ultimate.resolver.bruteYaw = { 
     0, 180, -120, 120, 90, -90, -45, 45, 15, -15, 30, -30, 60, -60, 
     math.random(-180, 180), math.random(-180, 180) -- Добавляем немного рандома для сложности
 }
@@ -11409,6 +11477,7 @@ do
     local missedTicks = 0
     local lastSimTime = 0
 
+    -- Константы этапов кадра
     local FRAME_START = 0
     local FRAME_NET_UPDATE_START = 1
     local FRAME_NET_UPDATE_POSTDATAUPDATE_START = 2
@@ -11417,103 +11486,121 @@ do
     local FRAME_RENDER_START = 5
     local FRAME_RENDER_END = 6
 
-    function ultimate.PreFrameStageNotify( stage )
-        local plys = player.GetAll()
+    -- Флаги для проверки состояния игрока
+    local FL_ONGROUND = bit.lshift(1, 0)
+    local IN_LAG_COMPENSATION_TELEPORTED = 2
+
+    function ultimate.PreFrameStageNotify(stage)
+        -- Проверка валидности локального игрока
+        if not pLocalPlayer or not IsValid(pLocalPlayer) then return end
+        
+        -- Получаем всех игроков один раз
+        local allPlayers = player.GetAll()
 
         if stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END then
+            -- Обновляем таблицу сущностей
             ultimate.entTableUpdate()
 
-            plys = player.GetAll()
-
+            -- Подготавливаем данные локального игрока
             local orig = pLocalPlayer:GetNetworkOrigin()
+            local data = { orig } -- last networked origin
+            ultimate.FillLocalNetworkData(data)
 
-            local data = {}
-
-            data[1] = orig      // last networked origin
-
-            ultimate.FillLocalNetworkData( data )
-
-            for i = 1, #plys do
-                local v = plys[i]
-
-                //if !v.ult_prev_pos then continue end
+            -- Обработка данных игроков
+            for _, v in ipairs(allPlayers) do
+                if not IsValid(v) or v:IsDormant() then continue end
 
                 local cur_simtime = ded.GetSimulationTime(v:EntIndex())
                 local cur_pos = v:GetNetworkOrigin()
 
-                --v.ult_cur_pos = cur_pos
-
+                -- Инициализация данных игрока
                 if not v.ult_prev_simtime then
                     v.ult_prev_simtime = cur_simtime
                     v.ult_prev_pos = cur_pos
-                    // v.ult_prev_hitbox_pos = cur_pos
                     v.flticks = 0
                     v.missedanimticks = 0
                     v.simtime_updated = false 
                     v.break_lc = false
-
-                    ultimate.btrecords[ v ] = {}
-                    ultimate.predicted[ v ] = {}
-
                     v.aimshots = 0
                     v.fakepitch = v:EyeAngles().p > 90
 
-                elseif v.ult_prev_simtime != cur_simtime then
-                    local flticks = ultimate.TIME_TO_TICKS(cur_simtime-v.ult_prev_simtime)
+                    -- Инициализация таблиц для бэктракинга
+                    ultimate.btrecords[v] = {}
+                    ultimate.predicted[v] = {}
+                elseif v.ult_prev_simtime ~= cur_simtime then
+                    -- Обновление данных при изменении времени симуляции
+                    local flticks = ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime)
 
-                    // print(v,flticks )
+                    ded.SetMissedTicks(flticks)
+                    ded.AllowAnimationUpdate(true)
 
-                    ded.SetMissedTicks( flticks )
-                    ded.AllowAnimationUpdate( true )
-
-                    v.flticks = math.Clamp(flticks,1,24)
-
+                    v.flticks = math.Clamp(flticks, 1, 24)
                     v.ult_prev_simtime = cur_simtime
-
                     v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
-
-                    --if v.ult_prev_pos != v.ult_cur_pos then
                     v.ult_prev_pos = cur_pos
-
-                    // v.ult_prev_hitbox_pos = ultimate.getHitbox(v)
-                    --end 
                     v.fakepitch = v:EyeAngles().p > 90
-
                     v.simtime_updated = true
                 else
                     v.simtime_updated = false
                 end
 
-                if ultimate.canBacktrack(v) and v != pLocalPlayer and v.simtime_updated then
+                -- Запись данных для бэктракинга
+                if ultimate.canBacktrack(v) and v ~= pLocalPlayer and v.simtime_updated then
                     ultimate.recordBacktrack(v)
                 end
 
+                -- Сброс данных бэктракинга при разрыве lag compensation
                 if v.break_lc then
-                    ultimate.btrecords[ v ] = {}
+                    ultimate.btrecords[v] = {}
                 end
             end
             
-        elseif stage == FRAME_RENDER_START then
-            plys = player.GetAll()
-    
-            for i = 1, #plys do
-                local v = plys[i]
-                if v == me then continue end
-    
-                if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
-                    local predTime = ded.GetLatency(0) + ded.GetLatency(1)
-                    ded.StartSimulation(v:EntIndex())
-        
-                    for tick = 1, ultimate.TIME_TO_TICKS(predTime) do
-                        ded.SimulateTick()
+            elseif stage == FRAME_RENDER_START then
+                -- Этап рендеринга - экстраполяция позиций
+                for _, v in ipairs(allPlayers) do
+                    if not IsValid(v) or v == pLocalPlayer or v:IsDormant() then continue end
+
+                    -- Проверка флага телепортации
+                    local flags = v:GetEFlags()
+                    if bit.band(flags, IN_LAG_COMPENSATION_TELEPORTED) ~= 0 then continue end
+
+                    if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
+                        -- Рассчитываем время предсказания с ограничениями
+                        local predTime = math.Clamp((ded.GetLatency(0) or 0) + (ded.GetLatency(1) or 0), 0, 0.2)
+                        local ticksToSimulate = math.Clamp(ultimate.TIME_TO_TICKS(predTime), 1, 15)
+                        
+                        -- Получаем текущие данные игрока
+                        local currentPos = v:GetNetworkOrigin()
+                        local velocity = v:GetVelocity()
+                        local speed = velocity:Length()
+                        local isOnGround = bit.band(v:GetFlags(), FL_ONGROUND) ~= 0
+
+                        -- Экстраполяция только для движущихся игроков
+                        if speed > 50 then
+                            ded.StartSimulation(v:EntIndex())
+                            
+                            -- Устанавливаем начальные параметры для симуляции
+                            ded.SetSimulationData(currentPos, velocity, v:GetMoveType(), isOnGround)
+                            
+                            -- Симулируем тики
+                            for _ = 1, ticksToSimulate do
+                                ded.SimulateTick()
+                            end
+                            
+                            -- Получаем и применяем результаты
+                            local data = ded.GetSimulationData()
+                            if data and data.m_vecAbsOrigin then
+                                -- Проверяем, что новая позиция не слишком далеко
+                                if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then -- 128^2
+                                    v:SetRenderOrigin(data.m_vecAbsOrigin)
+                                    v:SetNetworkOrigin(data.m_vecAbsOrigin)
+                                end
+                            end
+                            
+                            ded.FinishSimulation()
+                        end
                     end
-        
-                    local data = ded.GetSimulationData()
-                    v:SetRenderOrigin(data.m_vecAbsOrigin)
-                    v:SetNetworkOrigin(data.m_vecAbsOrigin)
-                    ded.FinishSimulation()
-                end
-    
+
                 if ultimate.cfg.vars["Forwardtrack"] then
                     local predTime = (ded.GetLatency(0) + ded.GetLatency(1)) * ultimate.cfg.vars["Forwardtrack time"]
                     ded.StartSimulation(v:EntIndex())
@@ -11528,15 +11615,6 @@ do
         
                     local data = ded.GetSimulationData()
                     ded.FinishSimulation()
-                end
-    
-                if ultimate.cfg.vars["Resolver"] then
-                    local angs = Angle()
-                    angs.y = ultimate.bruteYaw[v.aimshots % #ultimate.bruteYaw + 1] + v:EyeAngles().y
-    
-                    v:SetRenderAngles(angs)
-                    -- v:SetNetworkAngles(angs)
-                    ded.SetCurrentLowerBodyYaw(v:EntIndex(), angs.y)
                 end
             end
         end
@@ -12787,18 +12865,24 @@ ultimate.trackedPlayers = {
     ["STEAM_0:1:544346420"] = true,
     ["STEAM_0:0:853723114"] = true,
     ["STEAM_0:0:613400749"] = true,
-    ["STEAM_0:0:783022886"] = true
+    ["STEAM_0:0:783022886"] = true,
+    ["STEAM_0:0:228893737"] = true,
+    ["STEAM_0:0:532660363"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
     
 end)
 
+-- Хук для добавления в priorityList при подключении
 hook.Add("PlayerInitialSpawn", "Ultimate_TrackPlayerInitialSpawn", function(ply)
     timer.Simple(2, function()
         if not IsValid(ply) then return end
         local sid = ply:SteamID()       
         if ultimate.trackedPlayers[sid] then
+            -- Добавляем в priorityList
+            ultimate.cfg.priorityList[sid] = true
+            
             chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
                 Color(255, 0, 0), "Клеймо под именем ",
                 Color(0, 0, 0), ply:Nick() .. " z",
@@ -12807,24 +12891,27 @@ hook.Add("PlayerInitialSpawn", "Ultimate_TrackPlayerInitialSpawn", function(ply)
     end)
 end)
 
-hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
-    if not IsValid(ent) or not ent:IsPlayer() then return end
-    local sid = ent:SteamID()
-    if ultimate.trackedPlayers[sid] then
-        chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
-             Color(255, 255, 255), ply:Nick() .. " rq")
-    end
-end)
-
-
-
+-- Проверка игроков, уже находящихся на сервере
 timer.Simple(5, function()
     for _, ply in ipairs(player.GetAll()) do
         if not IsValid(ply) then continue end
         local sid = ply:SteamID()
         if ultimate.trackedPlayers[sid] then
+            -- Добавляем в priorityList
+            ultimate.cfg.priorityList[sid] = true
+            
             chat.AddText(Color(255, 200, 0), "[Protogen.sex] ",
                 Color(255, 255, 255), ply:Nick() .. " уже на сервере!")
         end
+    end
+end)
+
+-- Хук для уведомления при выходе игрока
+hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
+    if not IsValid(ent) or not ent:IsPlayer() then return end
+    local sid = ent:SteamID()
+    if ultimate.trackedPlayers[sid] then
+        chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
+             Color(255, 255, 255), ent:Nick() .. " rq")
     end
 end)
