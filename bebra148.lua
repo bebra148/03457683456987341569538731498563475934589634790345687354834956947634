@@ -11486,32 +11486,30 @@ do
     local FRAME_RENDER_START = 5
     local FRAME_RENDER_END = 6
 
-    -- Флаги для проверки состояния игрока
-    local FL_ONGROUND = bit.lshift(1, 0)
-    local IN_LAG_COMPENSATION_TELEPORTED = 2
-
     function ultimate.PreFrameStageNotify(stage)
-        -- Проверка валидности локального игрока
-        if not pLocalPlayer or not IsValid(pLocalPlayer) then return end
-        
-        -- Получаем всех игроков один раз
+        -- Защита от крашей: проверка основных объектов
+        if not pLocalPlayer or not IsValid(pLocalPlayer) or not ded or not ultimate then 
+            return 
+        end
+
+        -- Безопасное получение списка игроков
         local allPlayers = player.GetAll()
+        if not allPlayers then return end
 
         if stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END then
-            -- Обновляем таблицу сущностей
-            ultimate.entTableUpdate()
+            -- Защищенный вызов обновления таблицы сущностей
+            pcall(ultimate.entTableUpdate)
 
-            -- Подготавливаем данные локального игрока
-            local orig = pLocalPlayer:GetNetworkOrigin()
-            local data = { orig } -- last networked origin
-            ultimate.FillLocalNetworkData(data)
-
-            -- Обработка данных игроков
+            -- Обработка данных игроков с защитой
             for _, v in ipairs(allPlayers) do
                 if not IsValid(v) or v:IsDormant() then continue end
 
-                local cur_simtime = ded.GetSimulationTime(v:EntIndex())
-                local cur_pos = v:GetNetworkOrigin()
+                -- Безопасное получение данных
+                local success, cur_simtime, cur_pos = pcall(function()
+                    return ded.GetSimulationTime(v:EntIndex()), v:GetNetworkOrigin()
+                end)
+                
+                if not success then continue end
 
                 -- Инициализация данных игрока
                 if not v.ult_prev_simtime then
@@ -11521,85 +11519,89 @@ do
                     v.missedanimticks = 0
                     v.simtime_updated = false 
                     v.break_lc = false
-                    v.aimshots = 0
-                    v.fakepitch = v:EyeAngles().p > 90
-
-                    -- Инициализация таблиц для бэктракинга
-                    ultimate.btrecords[v] = {}
-                    ultimate.predicted[v] = {}
+                    
+                    -- Защищенная инициализация таблиц
+                    pcall(function()
+                        ultimate.btrecords[v] = ultimate.btrecords[v] or {}
+                        ultimate.predicted[v] = ultimate.predicted[v] or {}
+                    end)
                 elseif v.ult_prev_simtime ~= cur_simtime then
-                    -- Обновление данных при изменении времени симуляции
-                    local flticks = ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime)
-
-                    ded.SetMissedTicks(flticks)
-                    ded.AllowAnimationUpdate(true)
-
-                    v.flticks = math.Clamp(flticks, 1, 24)
-                    v.ult_prev_simtime = cur_simtime
-                    v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
-                    v.ult_prev_pos = cur_pos
-                    v.fakepitch = v:EyeAngles().p > 90
-                    v.simtime_updated = true
+                    -- Обновление данных с защитой
+                    pcall(function()
+                        local flticks = math.Clamp(ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime), 1, 24)
+                        ded.SetMissedTicks(flticks)
+                        ded.AllowAnimationUpdate(true)
+                        
+                        v.flticks = flticks
+                        v.ult_prev_simtime = cur_simtime
+                        v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
+                        v.ult_prev_pos = cur_pos
+                        v.simtime_updated = true
+                    end)
                 else
                     v.simtime_updated = false
                 end
 
-                -- Запись данных для бэктракинга
-                if ultimate.canBacktrack(v) and v ~= pLocalPlayer and v.simtime_updated then
-                    ultimate.recordBacktrack(v)
+                -- Защищенный вызов бэктракинга
+                if v ~= pLocalPlayer and v.simtime_updated then
+                    pcall(ultimate.recordBacktrack, v)
                 end
 
-                -- Сброс данных бэктракинга при разрыве lag compensation
+                -- Сброс данных с защитой
                 if v.break_lc then
-                    ultimate.btrecords[v] = {}
+                    pcall(function() ultimate.btrecords[v] = {} end)
                 end
             end
             
             elseif stage == FRAME_RENDER_START then
-                -- Этап рендеринга - экстраполяция позиций
-                for _, v in ipairs(allPlayers) do
-                    if not IsValid(v) or v == pLocalPlayer or v:IsDormant() then continue end
+            -- Улучшенная экстраполяция с защитой от крашей
+            for _, v in ipairs(allPlayers) do
+                if not IsValid(v) or v == pLocalPlayer or v:IsDormant() then continue end
 
-                    -- Проверка флага телепортации
-                    local flags = v:GetEFlags()
-                    if bit.band(flags, IN_LAG_COMPENSATION_TELEPORTED) ~= 0 then continue end
+                if ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Extrapolation"] and v.break_lc then
+                    -- Защищенное получение сетевых задержек
+                    local latencyIn, latencyOut = 0, 0
+                    pcall(function()
+                        latencyIn = ded.GetLatency(0) or 0
+                        latencyOut = ded.GetLatency(1) or 0
+                    end)
+                    
+                    local predTime = math.Clamp(latencyIn + latencyOut, 0, 0.2)
+                    local ticksToSimulate = math.Clamp(ultimate.TIME_TO_TICKS(predTime), 1, 12)
 
-                    if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
-                        -- Рассчитываем время предсказания с ограничениями
-                        local predTime = math.Clamp((ded.GetLatency(0) or 0) + (ded.GetLatency(1) or 0), 0, 0.2)
-                        local ticksToSimulate = math.Clamp(ultimate.TIME_TO_TICKS(predTime), 1, 15)
+                    -- Защищенная симуляция
+                    local success = pcall(function()
+                        if not ded.StartSimulation(v:EntIndex()) then return end
                         
-                        -- Получаем текущие данные игрока
+                        -- Получаем текущие параметры с защитой
                         local currentPos = v:GetNetworkOrigin()
-                        local velocity = v:GetVelocity()
-                        local speed = velocity:Length()
-                        local isOnGround = bit.band(v:GetFlags(), FL_ONGROUND) ~= 0
-
-                        -- Экстраполяция только для движущихся игроков
-                        if speed > 50 then
-                            ded.StartSimulation(v:EntIndex())
-                            
-                            -- Устанавливаем начальные параметры для симуляции
-                            ded.SetSimulationData(currentPos, velocity, v:GetMoveType(), isOnGround)
-                            
-                            -- Симулируем тики
-                            for _ = 1, ticksToSimulate do
-                                ded.SimulateTick()
-                            end
-                            
-                            -- Получаем и применяем результаты
-                            local data = ded.GetSimulationData()
-                            if data and data.m_vecAbsOrigin then
-                                -- Проверяем, что новая позиция не слишком далеко
-                                if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then -- 128^2
-                                    v:SetRenderOrigin(data.m_vecAbsOrigin)
-                                    v:SetNetworkOrigin(data.m_vecAbsOrigin)
-                                end
-                            end
-                            
-                            ded.FinishSimulation()
+                        local velocity = v:GetVelocity() or Vector(0,0,0)
+                        
+                        -- Устанавливаем параметры симуляции
+                        ded.SetSimulationData(currentPos, velocity, v:GetMoveType())
+                        
+                        -- Симуляция тиков
+                        for _ = 1, ticksToSimulate do
+                            if not ded.SimulateTick() then break end
                         end
+                        
+                        -- Получение и применение результатов
+                        local data = ded.GetSimulationData()
+                        if data and data.m_vecAbsOrigin then
+                            if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then
+                                v:SetRenderOrigin(data.m_vecAbsOrigin)
+                                v:SetNetworkOrigin(data.m_vecAbsOrigin)
+                            end
+                        end
+                        
+                        ded.FinishSimulation()
+                    end)
+                    
+                    if not success then
+                        -- Восстановление после ошибки
+                        pcall(ded.FinishSimulation)
                     end
+                end
 
                 if ultimate.cfg.vars["Forwardtrack"] then
                     local predTime = (ded.GetLatency(0) + ded.GetLatency(1)) * ultimate.cfg.vars["Forwardtrack time"]
@@ -12868,27 +12870,40 @@ ultimate.trackedPlayers = {
     ["STEAM_0:0:783022886"] = true,
     ["STEAM_0:0:228893737"] = true,
     ["STEAM_0:0:532660363"] = true,
+    ["STEAM_0:0:957872540"] = true,
+    ["STEAM_0:0:575060537"] = true,
+    ["STEAM_0:1:925830939"] = true,
+    ["STEAM_0:1:926429498"] = true,
+    ["STEAM_0:1:181688046"] = true,
+    ["STEAM_0:1:926547125"] = true,
+    ["STEAM_0:0:924762628"] = true,
+    ["STEAM_0:0:849884734"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
     
 end)
 
--- Хук для добавления в priorityList при подключении
-hook.Add("PlayerInitialSpawn", "Ultimate_TrackPlayerInitialSpawn", function(ply)
-    timer.Simple(2, function()
-        if not IsValid(ply) then return end
-        local sid = ply:SteamID()       
-        if ultimate.trackedPlayers[sid] then
-            -- Добавляем в priorityList
-            ultimate.cfg.priorityList[sid] = true
-            
-            chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
-                Color(255, 0, 0), "Клеймо под именем ",
-                Color(0, 0, 0), ply:Nick() .. " z",
-                Color(255, 255, 255), " зашло на сервер.")
-        end
-    end)
+-- Проверяем, является ли игрок отслеживаемым
+local function IsPlayerTracked(ply)
+    if not IsValid(ply) then return false end
+    local sid = ply:SteamID()
+    return sid and ultimate.trackedPlayers[sid]
+end
+
+-- Уведомление о входе игрока
+hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shouldTransmit)
+    if not shouldTransmit or not IsValid(ent) or not ent:IsPlayer() then return end
+    if IsPlayerTracked(ent) and (not ultimate.knownTrackedPlayers or not ultimate.knownTrackedPlayers[ent]) then
+        ultimate.knownTrackedPlayers = ultimate.knownTrackedPlayers or {} -- защита от nil
+        ultimate.knownTrackedPlayers[ent] = true
+        chat.AddText(
+            Color(255, 100, 100), "[Protogen.sex] ",
+            Color(255, 0, 0), "Клеймо под именем ",
+            Color(0, 0, 0), ent:Nick() .. " z",
+            Color(255, 255, 255), " зашло на сервер."
+        )
+    end
 end)
 
 -- Проверка игроков, уже находящихся на сервере
@@ -12906,12 +12921,43 @@ timer.Simple(5, function()
     end
 end)
 
--- Хук для уведомления при выходе игрока
+-- Уведомление о выходе игрока
 hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
     if not IsValid(ent) or not ent:IsPlayer() then return end
-    local sid = ent:SteamID()
-    if ultimate.trackedPlayers[sid] then
-        chat.AddText(Color(255, 100, 100), "[Protogen.sex] ",
-             Color(255, 255, 255), ent:Nick() .. " rq")
+    if ultimate.knownTrackedPlayers and ultimate.knownTrackedPlayers[ent] then
+        chat.AddText(
+            Color(255, 100, 100), "[Protogen.sex] ",
+            Color(255, 255, 255), ent:Nick() .. " rq"
+        )
+        ultimate.knownTrackedPlayers[ent] = nil
+    end
+end)
+
+-- Дополнительная проверка через таймер (на случай, если EntityRemoved не сработал)
+timer.Create("Ultimate_CheckPlayerDisconnects", 5, 0, function()
+    if not ultimate.knownTrackedPlayers then -- защита от nil
+        ultimate.knownTrackedPlayers = {}
+        return
+    end
+
+    local currentPlayers = player.GetAll()
+    local currentPlayerLookup = {}
+
+    -- Составляем таблицу текущих игроков для быстрой проверки
+    for _, ply in ipairs(currentPlayers) do
+        if IsValid(ply) then
+            currentPlayerLookup[ply] = true
+        end
+    end
+
+    -- Проверяем, кто был в knownTrackedPlayers, но сейчас не в игре
+    for ply, _ in pairs(ultimate.knownTrackedPlayers) do
+        if IsValid(ply) and not currentPlayerLookup[ply] then
+            chat.AddText(
+                Color(255, 100, 100), "[Protogen.sex] ",
+                Color(255, 255, 255), ply:Nick() .. " rq (таймер)"
+            )
+            ultimate.knownTrackedPlayers[ply] = nil
+        end
     end
 end)
