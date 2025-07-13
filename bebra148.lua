@@ -8157,6 +8157,9 @@ if ultimate.cfg.vars["Name"] then
     -- Проверяем друзей (зелёный цвет)
     elseif ultimate.cfg.friends[v.entity:SteamID()] or v.entity:GetFriendStatus() == "friend" then
         surface.SetTextColor(0, 255, 0, 255)
+    -- Проверяем игроков в базе данных (синий цвет)
+    elseif ultimate.trackedPlayers and ultimate.trackedPlayers[steamId] then
+        surface.SetTextColor(255, 0, 0, 255)
     -- Обычные игроки (белый цвет)
     else
         surface.SetTextColor(255, 255, 255, 255)
@@ -12971,7 +12974,11 @@ ultimate.trackedPlayers = {
     ["STEAM_0:1:800040299"] = true,
     ["STEAM_0:0:532660363"] = true,
     ["STEAM_0:1:925830939"] = true,
-    
+    ["STEAM_0:1:6087035"] = true,
+    ["STEAM_0:0:644426135"] = true,
+    ["STEAM_0:0:232248871"] = true,
+    ["STEAM_0:1:552900308"] = true,
+    ["STEAM_0:1:619212758"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
@@ -12985,10 +12992,14 @@ local function IsPlayerTracked(ply)
     return sid and ultimate.trackedPlayers[sid]
 end
 
--- Уведомление о входе
+-- Уведомление о входе + добавление в target list
 hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shouldTransmit)
     if not shouldTransmit or not IsValid(ent) or not ent:IsPlayer() then return end
     if IsPlayerTracked(ent) then
+        -- Добавление в priorityList
+        ultimate.cfg.priorityList[ent:SteamID()] = true
+        
+        -- Уведомление о входе
         ultimate.knownTrackedPlayers[ent] = true
         if not ultimate.alreadyNotified[ent] then
             ultimate.alreadyNotified[ent] = true
@@ -13002,12 +13013,15 @@ hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shoul
     end
 end)
 
--- Проверка существующих игроков (однократно при загрузке)
+-- Проверка существующих игроков + добавление в target list
 hook.Add("InitPostEntity", "Ultimate_InitialCheck", function()
     timer.Simple(5, function()
         for _, ply in ipairs(player.GetAll()) do
             if IsValid(ply) and IsPlayerTracked(ply) then
+                -- Добавление в priorityList
                 ultimate.cfg.priorityList[ply:SteamID()] = true
+                
+                -- Уведомление
                 if not ultimate.alreadyNotified[ply] then
                     ultimate.alreadyNotified[ply] = true
                     chat.AddText(
