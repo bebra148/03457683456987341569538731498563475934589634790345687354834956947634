@@ -3890,47 +3890,93 @@ function ultimate.tabs.Players()
         end
     end
 
-    -- Остальной код вкладки Players...
     for i = 1, #playerlist do
         local pEntity = playerlist[i]
-
         local pButton = vgui.Create("Panel", ultimate.scrollpanel)
         pButton:SetTall(25)
         pButton:Dock(TOP)
 
         function pButton:Paint(w, h)
             if not IsValid(pEntity) then self:Remove() return end
-
             local steamId = pEntity:SteamID()
-
-            surface.SetFont("DermaSmall")
-
-            -- Приоритетные игроки выделяются красным
-            if ultimate.cfg.priorityList[steamId] then
-                surface.SetTextColor(255, 0, 0)
-            elseif ultimate.cfg.friends[steamId] then
-                surface.SetTextColor(0, 255, 0)
-            else
-                surface.SetTextColor(255, 255, 255)
+            
+            -- Проверяем, есть ли игрок в базе данных или приоритетном списке
+            local isInDatabase = ultimate.trackedPlayers and ultimate.trackedPlayers[steamId]
+            local isPriority = ultimate.cfg.priorityList and ultimate.cfg.priorityList[steamId]
+            local isFriend = ultimate.cfg.friends and ultimate.cfg.friends[steamId]
+            
+            -- Фон для приоритетных игроков или из базы данных
+            if isInDatabase or isPriority then
+                surface.SetDrawColor(50, 0, 0, 100) -- темно-красный фон
+                surface.DrawRect(0, 0, w, h)
             end
-
-            surface.SetTextPos(10, 5)
+            
+            surface.SetFont("DermaSmall")
+            
+            -- Определяем цвет ника
+            local nameColor = Color(255, 255, 255) -- белый по умолчанию
+            if isInDatabase or isPriority then
+                nameColor = Color(255, 50, 50) -- ярко-красный для приоритетных игроков
+            elseif isFriend then
+                nameColor = Color(0, 255, 0) -- зеленый для друзей
+            end
+            
+            -- Рисуем индикатор слева для игроков из базы
+            local nameStartX = 10
+            if isInDatabase then
+                surface.SetTextColor(255, 200, 0)
+                surface.SetTextPos(2, 5)
+                surface.DrawText("⚠") -- предупреждающий знак
+                nameStartX = 15
+            end
+            
+            -- Рисуем ник
+            surface.SetTextColor(nameColor.r, nameColor.g, nameColor.b)
+            surface.SetTextPos(nameStartX, 5)
             surface.DrawText(pEntity:Name())
-
+            
+            -- Добавляем индикаторы справа от ника
+            local nameWidth = surface.GetTextSize(pEntity:Name())
+            local indicatorX = nameStartX + nameWidth + 5
+            
+            -- Индикатор базы данных
+            if isInDatabase then
+                surface.SetTextColor(255, 0, 0)
+                surface.SetTextPos(indicatorX, 5)
+                surface.DrawText("[Cheat]")
+                indicatorX = indicatorX + surface.GetTextSize("[Cheat]") + 3
+            end
+            
+            -- Индикатор приоритета
+            if isPriority and not isInDatabase then
+                surface.SetTextColor(255, 100, 0)
+                surface.SetTextPos(indicatorX, 5)
+                surface.DrawText("[Piority]")
+                indicatorX = indicatorX + surface.GetTextSize("[Piority]") + 3
+            end
+            
+            -- Индикатор друга
+            if isFriend then
+                surface.SetTextColor(0, 255, 0)
+                surface.SetTextPos(indicatorX, 5)
+                surface.DrawText("[Friend]")
+            end
+            
+            -- Команда/группа (по центру)
             local teamIndex, teamName, teamColor = ultimate.GetTeam(pEntity)
             local textWidth, textHeight = surface.GetTextSize(teamName)
-
             surface.SetTextColor(teamColor)
             surface.SetTextPos(w / 2 - textWidth / 2, 5)
             surface.DrawText(teamName)
-
+            
+            -- Пользовательская группа (справа)
             local userGroup = ultimate.GetUserGroup(pEntity)
             local textWidth, textHeight = surface.GetTextSize(userGroup)
-
             surface.SetTextColor(255, 255, 255)
             surface.SetTextPos(w - textWidth - 5, 5)
             surface.DrawText(userGroup)
-
+            
+            -- Разделительная линия
             surface.SetDrawColor(45, 45, 45)
             surface.DrawRect(0, h - 1, w, 1)
         end
@@ -3942,18 +3988,10 @@ function ultimate.tabs.Players()
 
             if mouseCode == MOUSE_LEFT then
                 -- ЛКМ - управление друзьями
-                if not ultimate.cfg.friends[steamId] then
-                    ultimate.cfg.friends[steamId] = true
-                else
-                    ultimate.cfg.friends[steamId] = nil
-                end
+                ultimate.cfg.friends[steamId] = not ultimate.cfg.friends[steamId]
             elseif mouseCode == MOUSE_RIGHT then
                 -- ПКМ - управление приоритетным списком
-                if not ultimate.cfg.priorityList[steamId] then
-                    ultimate.cfg.priorityList[steamId] = true
-                else
-                    ultimate.cfg.priorityList[steamId] = nil
-                end
+                ultimate.cfg.priorityList[steamId] = not ultimate.cfg.priorityList[steamId]
             end
         end
     end
@@ -5352,11 +5390,6 @@ end
 
 ultimate.grabbingEnt = false 
 
-function ultimate.DrawPhysgunBeam( ply, wep, e, tar, bone, hitpos )
-    if ply != pLocalPlayer then return end 
-
-    ultimate.grabbingEnt = IsValid( tar ) and tar or false
-end
 
 ultimate.predictedPoint = {}
 function ultimate.PropAim( cmd )
@@ -11517,30 +11550,45 @@ do
     local FRAME_RENDER_START = 5
     local FRAME_RENDER_END = 6
 
+    -- Флаги для проверки состояния игрока
+    local FL_ONGROUND = bit.lshift(1, 0)
+    local IN_LAG_COMPENSATION_TELEPORTED = 2
+
+    -- Локальная функция для безопасного выполнения
+    local function SafeCall(fn, ...)
+        local success, result = pcall(fn, ...)
+        return success and result or nil
+    end
+
     function ultimate.PreFrameStageNotify(stage)
-        -- Защита от крашей: проверка основных объектов
+        -- Проверка основных объектов
         if not pLocalPlayer or not IsValid(pLocalPlayer) or not ded or not ultimate then 
             return 
         end
 
-        -- Безопасное получение списка игроков
-        local allPlayers = player.GetAll()
-        if not allPlayers then return end
+        -- Проверяем включена ли экстраполяция
+        local extrapolationEnabled = SafeCall(function() 
+            return ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Extrapolation"]
+        end)
+
+        -- Получаем всех игроков безопасно
+        local allPlayers = SafeCall(player.GetAll) or {}
 
         if stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END then
-            -- Защищенный вызов обновления таблицы сущностей
-            pcall(ultimate.entTableUpdate)
+            -- Обновляем таблицу сущностей
+            SafeCall(ultimate.entTableUpdate)
 
-            -- Обработка данных игроков с защитой
+            -- Подготавливаем данные локального игрока
+            local orig = SafeCall(pLocalPlayer.GetNetworkOrigin, pLocalPlayer) or Vector(0,0,0)
+            local data = { orig }
+            SafeCall(ultimate.FillLocalNetworkData, data)
+
+            -- Обработка данных игроков
             for _, v in ipairs(allPlayers) do
                 if not IsValid(v) or v:IsDormant() then continue end
 
-                -- Безопасное получение данных
-                local success, cur_simtime, cur_pos = pcall(function()
-                    return ded.GetSimulationTime(v:EntIndex()), v:GetNetworkOrigin()
-                end)
-                
-                if not success then continue end
+                local cur_simtime = SafeCall(ded.GetSimulationTime, v:EntIndex()) or 0
+                local cur_pos = SafeCall(v.GetNetworkOrigin, v) or Vector(0,0,0)
 
                 -- Инициализация данных игрока
                 if not v.ult_prev_simtime then
@@ -11550,87 +11598,85 @@ do
                     v.missedanimticks = 0
                     v.simtime_updated = false 
                     v.break_lc = false
-                    
-                    -- Защищенная инициализация таблиц
-                    pcall(function()
-                        ultimate.btrecords[v] = ultimate.btrecords[v] or {}
-                        ultimate.predicted[v] = ultimate.predicted[v] or {}
-                    end)
+                    v.aimshots = 0
+                    v.fakepitch = SafeCall(v.EyeAngles, v) and v:EyeAngles().p > 90 or false
+
+                    -- Инициализация таблиц для бэктракинга
+                    ultimate.btrecords[v] = ultimate.btrecords[v] or {}
+                    ultimate.predicted[v] = ultimate.predicted[v] or {}
                 elseif v.ult_prev_simtime ~= cur_simtime then
-                    -- Обновление данных с защитой
-                    pcall(function()
-                        local flticks = math.Clamp(ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime), 1, 24)
-                        ded.SetMissedTicks(flticks)
-                        ded.AllowAnimationUpdate(true)
-                        
-                        v.flticks = flticks
-                        v.ult_prev_simtime = cur_simtime
-                        v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
-                        v.ult_prev_pos = cur_pos
-                        v.simtime_updated = true
-                    end)
+                    -- Обновление данных при изменении времени симуляции
+                    local flticks = math.Clamp(ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime), 1, 24)
+
+                    SafeCall(ded.SetMissedTicks, flticks)
+                    SafeCall(ded.AllowAnimationUpdate, true)
+
+                    v.flticks = flticks
+                    v.ult_prev_simtime = cur_simtime
+                    v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
+                    v.ult_prev_pos = cur_pos
+                    v.fakepitch = SafeCall(v.EyeAngles, v) and v:EyeAngles().p > 90 or false
+                    v.simtime_updated = true
                 else
                     v.simtime_updated = false
                 end
 
-                -- Защищенный вызов бэктракинга
-                if v ~= pLocalPlayer and v.simtime_updated then
-                    pcall(ultimate.recordBacktrack, v)
+                -- Запись данных для бэктракинга
+                if ultimate.canBacktrack and SafeCall(ultimate.canBacktrack, v) and v ~= pLocalPlayer and v.simtime_updated then
+                    SafeCall(ultimate.recordBacktrack, v)
                 end
 
-                -- Сброс данных с защитой
+                -- Сброс данных бэктракинга при разрыве lag compensation
                 if v.break_lc then
-                    pcall(function() ultimate.btrecords[v] = {} end)
+                    ultimate.btrecords[v] = {}
                 end
             end
             
-            elseif stage == FRAME_RENDER_START then
-            -- Улучшенная экстраполяция с защитой от крашей
+            elseif stage == FRAME_RENDER_START and extrapolationEnabled then
+            -- Этап рендеринга - экстраполяция позиций (только если включена)
             for _, v in ipairs(allPlayers) do
                 if not IsValid(v) or v == pLocalPlayer or v:IsDormant() then continue end
 
-                if ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Extrapolation"] and v.break_lc then
-                    -- Защищенное получение сетевых задержек
-                    local latencyIn, latencyOut = 0, 0
-                    pcall(function()
-                        latencyIn = ded.GetLatency(0) or 0
-                        latencyOut = ded.GetLatency(1) or 0
-                    end)
-                    
+                -- Проверка флага телепортации
+                local flags = SafeCall(v.GetEFlags, v) or 0
+                if bit.band(flags, IN_LAG_COMPENSATION_TELEPORTED) ~= 0 then continue end
+
+                if v.break_lc then
+                    -- Рассчитываем время предсказания с ограничениями
+                    local latencyIn = SafeCall(ded.GetLatency, 0) or 0
+                    local latencyOut = SafeCall(ded.GetLatency, 1) or 0
                     local predTime = math.Clamp(latencyIn + latencyOut, 0, 0.2)
                     local ticksToSimulate = math.Clamp(ultimate.TIME_TO_TICKS(predTime), 1, 12)
-
-                    -- Защищенная симуляция
-                    local success = pcall(function()
-                        if not ded.StartSimulation(v:EntIndex()) then return end
-                        
-                        -- Получаем текущие параметры с защитой
-                        local currentPos = v:GetNetworkOrigin()
-                        local velocity = v:GetVelocity() or Vector(0,0,0)
-                        
-                        -- Устанавливаем параметры симуляции
-                        ded.SetSimulationData(currentPos, velocity, v:GetMoveType())
-                        
-                        -- Симуляция тиков
-                        for _ = 1, ticksToSimulate do
-                            if not ded.SimulateTick() then break end
-                        end
-                        
-                        -- Получение и применение результатов
-                        local data = ded.GetSimulationData()
-                        if data and data.m_vecAbsOrigin then
-                            if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then
-                                v:SetRenderOrigin(data.m_vecAbsOrigin)
-                                v:SetNetworkOrigin(data.m_vecAbsOrigin)
-                            end
-                        end
-                        
-                        ded.FinishSimulation()
-                    end)
                     
-                    if not success then
-                        -- Восстановление после ошибки
-                        pcall(ded.FinishSimulation)
+                    -- Получаем текущие данные игрока
+                    local currentPos = SafeCall(v.GetNetworkOrigin, v) or Vector(0,0,0)
+                    local velocity = SafeCall(v.GetVelocity, v) or Vector(0,0,0)
+                    local speed = velocity:Length()
+                    local isOnGround = bit.band(SafeCall(v.GetFlags, v) or 0, FL_ONGROUND) ~= 0
+
+                    -- Экстраполяция только для движущихся игроков
+                    if speed > 50 then
+                        if SafeCall(ded.StartSimulation, v:EntIndex()) then
+                            -- Устанавливаем начальные параметры для симуляции
+                            SafeCall(ded.SetSimulationData, currentPos, velocity, SafeCall(v.GetMoveType, v), isOnGround)
+                            
+                            -- Симулируем тики
+                            for _ = 1, ticksToSimulate do
+                                if not SafeCall(ded.SimulateTick) then break end
+                            end
+                            
+                            -- Получаем и применяем результаты
+                            local data = SafeCall(ded.GetSimulationData)
+                            if data and data.m_vecAbsOrigin then
+                                -- Проверяем, что новая позиция не слишком далеко
+                                if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then -- 128^2
+                                    SafeCall(v.SetRenderOrigin, v, data.m_vecAbsOrigin)
+                                    SafeCall(v.SetNetworkOrigin, v, data.m_vecAbsOrigin)
+                                end
+                            end
+                            
+                            SafeCall(ded.FinishSimulation)
+                        end
                     end
                 end
 
@@ -12237,7 +12283,7 @@ ultimate.trackedPlayers = {
     ["STEAM_0:0:486041428"] = true, 
     ["STEAM_0:0:714504867"] = true, 
     ["STEAM_0:0:531426256"] = true, 
-    ["STEAM_0:1:187613416"] = true, 
+    ["STEAM_0:1:187613416"] = true,     
     ["STEAM_0:0:462689539"] = true, 
     ["STEAM_0:1:192913718"] = true, 
     ["STEAM_0:0:804267023"] = true, 
@@ -12896,99 +12942,93 @@ ultimate.trackedPlayers = {
     ["STEAM_0:0:172562376"] = true,
     ["STEAM_0:1:762252049"] = true,
     ["STEAM_0:1:544346420"] = true,
+    ["STEAM_0:0:613400749"] = true,
+    ["STEAM_0:0:783022886"] = true,
+    ["STEAM_0:0:935301216"] = true,
+    ["STEAM_0:1:540522801"] = true,
+    ["STEAM_0:1:28480875"] = true,
+    ["STEAM_0:0:518956852"] = true,
+    ["STEAM_0:0:164481968"] = true,
     ["STEAM_0:0:853723114"] = true,
     ["STEAM_0:0:613400749"] = true,
     ["STEAM_0:0:783022886"] = true,
-    ["STEAM_0:0:228893737"] = true,
+    ["STEAM_0:0:935301216"] = true,
+    ["STEAM_0:1:540522801"] = true,
+    ["STEAM_0:1:28480875"] = true,
+    ["STEAM_0:0:518956852"] = true,
+    ["STEAM_0:0:164481968"] = true,
+    ["STEAM_0:0:551106214"] = true,
+    ["STEAM_0:1:627564669"] = true,
+    ["STEAM_0:0:896200293"] = true,
+    ["STEAM_0:1:800040299"] = true,
+    ["STEAM_0:1:76120031"] = true,
+    ["STEAM_0:0:179072055"] = true,
+    ["STEAM_0:0:637969207"] = true,
+    ["STEAM_0:0:846035146"] = true,
+    ["STEAM_0:0:563650780"] = true,
+    ["STEAM_0:1:128010401"] = true,
+    ["STEAM_0:1:666396418"] = true,
+    ["STEAM_0:1:800040299"] = true,
     ["STEAM_0:0:532660363"] = true,
-    ["STEAM_0:0:957872540"] = true,
-    ["STEAM_0:0:575060537"] = true,
     ["STEAM_0:1:925830939"] = true,
-    ["STEAM_0:1:926429498"] = true,
-    ["STEAM_0:1:181688046"] = true,
-    ["STEAM_0:1:926547125"] = true,
-    ["STEAM_0:0:924762628"] = true,
-    ["STEAM_0:0:849884734"] = true,
+    
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
     
 end)
 
--- Проверяем, является ли игрок отслеживаемым
+-- Проверка игрока
 local function IsPlayerTracked(ply)
     if not IsValid(ply) then return false end
     local sid = ply:SteamID()
     return sid and ultimate.trackedPlayers[sid]
 end
 
--- Уведомление о входе игрока
+-- Уведомление о входе
 hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shouldTransmit)
     if not shouldTransmit or not IsValid(ent) or not ent:IsPlayer() then return end
-    if IsPlayerTracked(ent) and (not ultimate.knownTrackedPlayers or not ultimate.knownTrackedPlayers[ent]) then
-        ultimate.knownTrackedPlayers = ultimate.knownTrackedPlayers or {} -- защита от nil
+    if IsPlayerTracked(ent) then
         ultimate.knownTrackedPlayers[ent] = true
-        chat.AddText(
-            Color(255, 100, 100), "[Protogen.sex] ",
-            Color(255, 0, 0), "Клеймо под именем ",
-            Color(0, 0, 0), ent:Nick() .. " z",
-            Color(255, 255, 255), " зашло на сервер."
-        )
-    end
-end)
-
--- Проверка игроков, уже находящихся на сервере
-timer.Simple(5, function()
-    for _, ply in ipairs(player.GetAll()) do
-        if not IsValid(ply) then continue end
-        local sid = ply:SteamID()
-        if ultimate.trackedPlayers[sid] then
-            -- Добавляем в priorityList
-            ultimate.cfg.priorityList[sid] = true
-            
-            chat.AddText(Color(255, 200, 0), "[Protogen.sex] ",
-                Color(255, 255, 255), ply:Nick() .. " уже на сервере!")
-        end
-    end
-end)
-
--- Уведомление о выходе игрока
-hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
-    if not IsValid(ent) or not ent:IsPlayer() then return end
-    if ultimate.knownTrackedPlayers and ultimate.knownTrackedPlayers[ent] then
-        chat.AddText(
-            Color(255, 100, 100), "[Protogen.sex] ",
-            Color(255, 255, 255), ent:Nick() .. " rq"
-        )
-        ultimate.knownTrackedPlayers[ent] = nil
-    end
-end)
-
--- Дополнительная проверка через таймер (на случай, если EntityRemoved не сработал)
-timer.Create("Ultimate_CheckPlayerDisconnects", 5, 0, function()
-    if not ultimate.knownTrackedPlayers then -- защита от nil
-        ultimate.knownTrackedPlayers = {}
-        return
-    end
-
-    local currentPlayers = player.GetAll()
-    local currentPlayerLookup = {}
-
-    -- Составляем таблицу текущих игроков для быстрой проверки
-    for _, ply in ipairs(currentPlayers) do
-        if IsValid(ply) then
-            currentPlayerLookup[ply] = true
-        end
-    end
-
-    -- Проверяем, кто был в knownTrackedPlayers, но сейчас не в игре
-    for ply, _ in pairs(ultimate.knownTrackedPlayers) do
-        if IsValid(ply) and not currentPlayerLookup[ply] then
+        if not ultimate.alreadyNotified[ent] then
+            ultimate.alreadyNotified[ent] = true
             chat.AddText(
                 Color(255, 100, 100), "[Protogen.sex] ",
-                Color(255, 255, 255), ply:Nick() .. " rq (таймер)"
+                Color(255, 0, 0), "читер с ником ",
+                Color(0, 0, 0), ent:Nick(),
+                Color(255, 255, 255), " зашел на сервер."
             )
-            ultimate.knownTrackedPlayers[ply] = nil
         end
+    end
+end)
+
+-- Проверка существующих игроков (однократно при загрузке)
+hook.Add("InitPostEntity", "Ultimate_InitialCheck", function()
+    timer.Simple(5, function()
+        for _, ply in ipairs(player.GetAll()) do
+            if IsValid(ply) and IsPlayerTracked(ply) then
+                ultimate.cfg.priorityList[ply:SteamID()] = true
+                if not ultimate.alreadyNotified[ply] then
+                    ultimate.alreadyNotified[ply] = true
+                    chat.AddText(
+                        Color(255, 200, 0), "[Protogen.sex] ",
+                        Color(255, 255, 255), ply:Nick() .. " уже на сервере!"
+                    )
+                end
+            end
+        end
+    end)
+end)
+
+-- Уведомление о выходе
+hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
+    if not IsValid(ent) or not ent:IsPlayer() then return end
+    if ultimate.knownTrackedPlayers[ent] then
+        chat.AddText(
+            Color(255, 100, 100), "[Protogen.sex] ",
+            Color(255, 0, 0), ent:Nick() .. " rq"
+        )
+        ultimate.knownTrackedPlayers[ent] = nil
+        ultimate.alreadyNotified[ent] = nil
     end
 end)
