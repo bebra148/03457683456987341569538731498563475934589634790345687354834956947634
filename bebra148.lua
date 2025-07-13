@@ -8827,168 +8827,198 @@ ultimate.resolver = {
     maxMissCount = 3,
     angleMemoryTime = 5,
     historySize = 8,
-    tolerance = 15,
-    updateInterval = 0.5,
-
+    updateInterval = 0.3,
+    
+    -- Типы анти-аймов
     AntiAimTypes = {
+        NONE = 0,
         JITTER = 1,
         SPIN = 2,
         STATIC = 3,
-        LBY = 4,
-        SIDE = 5,
-        NONE = 0 -- Добавляем тип "без анти-айма"
+        LBY = 4
     }
 }
 
--- Функция определения, использует ли игрок анти-аим
+-- Глобальные данные
+ultimate.playerData = ultimate.playerData or {}
+ultimate.shotData = ultimate.shotData or {
+    lastShotTime = 0,
+    lastShotAngle = Angle(0,0,0),
+    hitConfirmed = false
+}
+
+-- =============================================
+-- Основные функции
+-- =============================================
+
+-- Проверка включен ли ресольвер
+local function IsResolverEnabled()
+    return ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Resolver"]
+end
+
+-- Определение использует ли игрок анти-аим
 local function IsUsingAntiAim(target)
+    if not IsResolverEnabled() then return false end
     if not IsValid(target) or target:IsBot() then return false end
     
-    -- Проверяем аномальные значения pitch (анти-аим по вертикали)
     local ang = target:EyeAngles()
-    
-    -- Нормальный pitch обычно между -89 и 89 градусами
-    -- Проверяем несколько вариантов анти-аима:
-    if math.abs(ang.p) > 89 then -- Классический анти-аим (вверх/вниз)
-        return true
-    elseif math.abs(ang.p) < 1 then -- Слишком ровный pitch (редко бывает у реальных игроков)
-        -- Но сначала проверяем, не просто ли он смотрит прямо
-        if target:GetVelocity():Length() > 10 then -- Если двигается и pitch 0 - подозрительно
-            return true
-        end
-    elseif math.abs(ang.p) > 45 and math.abs(ang.p) < 89 then -- Промежуточные подозрительные значения
-        -- Проверяем, не меняется ли pitch резко (джиттер)
-        local data = ultimate.playerData[target] or {}
-        if #(data.pitchHistory or {}) > 2 then
-            local lastPitch = data.pitchHistory[#data.pitchHistory] or 0
-            if math.abs(lastPitch - ang.p) > 30 then -- Резкое изменение pitch
-                return true
-            end
-        end
-    end
-    
-    -- Дополнительная проверка для "fake pitch down" (когда реальный pitch вниз)
-    if ang.p < -70 then -- Сильно смотрит вниз
-        -- Проверяем, не приседает ли игрок
-        if target:GetPoseParameter("duck") < 0.5 then -- Если не присел, но смотрит вниз - анти-аим
-            return true
-        end
-    end
-    
-    -- Проверяем необычные изменения углов
     local data = ultimate.playerData[target] or {}
+    
+    -- Проверка вертикального анти-айма
+    if math.abs(ang.p) > 89 then return true end
+    if math.abs(ang.p) < 1 and target:GetVelocity():Length() > 10 then return true end
+    
+    -- Проверка горизонтального анти-айма
     if #(data.angleHistory or {}) >= 3 then
         local changes = {}
         for i = 2, #data.angleHistory do
             table.insert(changes, math.AngleDifference(data.angleHistory[i], data.angleHistory[i-1]))
         end
         
-        -- Если есть резкие изменения углов - вероятно анти-аим
         for _, change in ipairs(changes) do
             if math.abs(change) > 35 then return true end
         end
     end
     
-    -- Проверяем расхождение между взглядом и телом
+    -- Проверка LBY
     local lby = target:GetPoseParameter("body_yaw") or 0
     if math.abs(math.AngleDifference(ang.y, lby)) > 60 then return true end
     
-    -- Если ничего подозрительного не найдено
     return false
 end
 
--- Модифицированная функция ресольвера
-local function ResolveYaw(target)
-    if not IsValid(target) then return nil end
-    
-    -- Если это бот или игрок без анти-айма - не применяем ресольвер
-    if target:IsBot() or not IsUsingAntiAim(target) then
-        return nil -- nil будет означать "не применять ресольвер"
-    end
+-- Обновление истории углов
+local function UpdateAngleHistory(target)
+    if not IsResolverEnabled() then return end
+    if not IsValid(target) then return end
     
     local data = ultimate.playerData[target] or {}
-    data.antiAimType = data.antiAimType or ultimate.resolver.AntiAimTypes.NONE
+    local ang = target:EyeAngles()
     
-    -- Если игрок не использует анти-аим (определили ранее)
-    if data.antiAimType == ultimate.resolver.AntiAimTypes.NONE then
-        return nil
+    -- Сохраняем историю углов
+    data.angleHistory = data.angleHistory or {}
+    table.insert(data.angleHistory, ang.y)
+    if #data.angleHistory > ultimate.resolver.historySize then
+        table.remove(data.angleHistory, 1)
     end
     
-    -- Остальная логика ресольвера...
+    -- Определяем тип анти-айма
+    data.antiAimType = IsUsingAntiAim(target) and ultimate.resolver.AntiAimTypes.JITTER or ultimate.resolver.AntiAimTypes.NONE
+    
+    ultimate.playerData[target] = data
+end
+
+-- Основная функция ресольва углов
+local function ResolveYaw(target)
+    if not IsResolverEnabled() then return nil end
+    if not IsValid(target) then return nil end
+    
+    local data = ultimate.playerData[target] or {}
     local curTime = CurTime()
     
-    -- 1. Приоритет - успешные углы (но только если было попадание)
+    -- Используем успешный угол если есть
     if data.lastHitAngle and curTime - data.lastHitTime < ultimate.resolver.angleMemoryTime then
-        -- Проверяем, не было ли слишком много промахов подряд
         if (data.missCount or 0) < ultimate.resolver.maxMissCount then
             return data.lastHitAngle
-        else
-            data.lastHitAngle = nil -- Сбрасываем после многих промахов
         end
     end
     
-    -- 2. Стандартный брутфорс с проверкой на существование таблицы
-    if not ultimate.resolver.bruteYaw or #ultimate.resolver.bruteYaw == 0 then
-        ultimate.resolver.bruteYaw = {0, 180, -90, 90} -- значения по умолчанию
-    end
-    
-    local bruteIndex = ((target.aimshots or 0) % #ultimate.resolver.bruteYaw) + 1
-    return target:EyeAngles().y + ultimate.resolver.bruteYaw[bruteIndex]
+    -- Брутфорс углов
+    local bruteYaw = ultimate.resolver.bruteYaw
+    local bruteIndex = ((target.aimshots or 0) % #bruteYaw) + 1
+    return target:EyeAngles().y + bruteYaw[bruteIndex]
 end
 
--- Основная функция с улучшенной логикой
+-- =============================================
+-- Хуки и обработчики событий
+-- =============================================
+
+-- Обработка попаданий
+hook.Add("EntityFireBullets", "ultimate.ResolverHitTrack", function(attacker, tr, dmginfo)
+    if not IsResolverEnabled() then return end
+    if attacker == LocalPlayer() and IsValid(tr.Entity) and tr.Entity:IsPlayer() then
+        local target = tr.Entity
+        local data = ultimate.playerData[target] or {}
+        
+        data.lastHitAngle = ultimate.shotData.lastShotAngle.y
+        data.lastHitTime = CurTime()
+        data.missCount = 0
+        
+        ultimate.playerData[target] = data
+        ultimate.shotData.hitConfirmed = true
+    end
+end)
+
+-- Обработка выстрелов
+hook.Add("PlayerFireAnimationEvent", "ultimate.PlayerFire", function(ply, event, data)
+    if not IsResolverEnabled() then return end
+    if ply == LocalPlayer() and event == 22 then
+        ultimate.shotData.lastShotTime = CurTime()
+        ultimate.shotData.lastShotAngle = ply:EyeAngles()
+        ultimate.shotData.hitConfirmed = false
+        
+        -- Проверка промаха через 0.1 сек
+        timer.Simple(0.1, function()
+            if IsResolverEnabled() and not ultimate.shotData.hitConfirmed then
+                for _, target in pairs(player.GetAll()) do
+                    if target ~= ply and ultimate.playerData[target] then
+                        ultimate.playerData[target].missCount = (ultimate.playerData[target].missCount or 0) + 1
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- =============================================
+-- Основная функция рендеринга
+-- =============================================
+
 function ultimate.PrePlayerDraw(pEntity)
     if not IsValid(pEntity) or pEntity == LocalPlayer() then return end
     
-    -- Инициализация данных
-    ultimate.playerData = ultimate.playerData or {}
-    ultimate.playerData[pEntity] = ultimate.playerData[pEntity] or {
-        angleHistory = {},
-        antiAimType = ultimate.resolver.AntiAimTypes.NONE,
-        lastHitAngle = nil,
-        missCount = 0,
-        lastHitTime = 0
-    }
-    
-    -- Обновляем историю углов
-    if (ultimate.playerData[pEntity].lastUpdate or 0) + ultimate.resolver.updateInterval < CurTime() then
-        local ang = pEntity:EyeAngles()
-        table.insert(ultimate.playerData[pEntity].angleHistory, ang.y)
+    -- Инициализация данных только при включенном ресольвере
+    if IsResolverEnabled() then
+        ultimate.playerData[pEntity] = ultimate.playerData[pEntity] or {
+            angleHistory = {},
+            antiAimType = ultimate.resolver.AntiAimTypes.NONE,
+            lastHitAngle = nil,
+            missCount = 0,
+            lastHitTime = 0,
+            lastUpdate = 0
+        }
         
-        if #ultimate.playerData[pEntity].angleHistory > ultimate.resolver.historySize then
-            table.remove(ultimate.playerData[pEntity].angleHistory, 1)
+        -- Обновляем историю углов
+        if (ultimate.playerData[pEntity].lastUpdate or 0) + ultimate.resolver.updateInterval < CurTime() then
+            UpdateAngleHistory(pEntity)
+            ultimate.playerData[pEntity].lastUpdate = CurTime()
         end
-        
-        -- Определяем тип анти-айма
-        ultimate.playerData[pEntity].antiAimType = IsUsingAntiAim(pEntity) and 
-            ultimate.resolver.AntiAimTypes.JITTER or ultimate.resolver.AntiAimTypes.NONE
-        
-        ultimate.playerData[pEntity].lastUpdate = CurTime()
     end
     
-    -- Применяем ресольвер только если игрок использует анти-аим
-    local resolvedYaw = ResolveYaw(pEntity)
-    if not resolvedYaw then -- Если ресольвер не нужен
-        pEntity:SetRenderAngles(Angle(0, pEntity:EyeAngles().y, 0))
-    else
-        local angs = Angle(0, resolvedYaw + (ultimate.cfg.vars["add delta"] or 0), 0)
-        pEntity:SetRenderAngles(angs)
+    -- Получаем конечный угол
+    local finalYaw = IsResolverEnabled() and ResolveYaw(pEntity) or pEntity:EyeAngles().y
+    local renderAngles = Angle(0, finalYaw + (IsResolverEnabled() and (ultimate.cfg.vars["add delta"] or 0) or 0), 0)
+    
+    -- Применяем углы
+    pEntity:SetRenderAngles(renderAngles)
+    
+    -- Дополнительные эффекты ресольвера
+    if IsResolverEnabled() then
         if ded and ded.SetCurrentLowerBodyYaw then
-            ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), angs.y)
+            ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), renderAngles.y)
+        end
+        
+        if ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch then
+            pEntity:SetPoseParameter("aim_pitch", -45)
+            pEntity:SetPoseParameter("head_pitch", -45)
         end
     end
     
-    -- Остальной код...
+    -- Стандартные операции рендеринга
     pEntity:AnimResetGestureSlot(GESTURE_SLOT_VCD)
     pEntity:AnimResetGestureSlot(GESTURE_SLOT_CUSTOM)
     pEntity:SetPoseParameter("head_pitch", 0)
     pEntity:SetPoseParameter("head_yaw", 0)
-    
-    if ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch then
-        pEntity:SetPoseParameter("aim_pitch", -45)
-        pEntity:SetPoseParameter("head_pitch", -45)
-    end
-    
     pEntity:InvalidateBoneCache()
     pEntity:SetupBones()
     pEntity.ChatGestureWeight = 0
