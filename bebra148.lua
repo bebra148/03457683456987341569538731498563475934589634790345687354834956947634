@@ -12933,13 +12933,6 @@ hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
     end
 end)
 
--- Дополнительная проверка через таймер (на случай, если EntityRemoved не сработал)
-timer.Create("Ultimate_CheckPlayerDisconnects", 5, 0, function()
-    if not ultimate.knownTrackedPlayers then -- защита от nil
-        ultimate.knownTrackedPlayers = {}
-        return
-    end
-
     local currentPlayers = player.GetAll()
     local currentPlayerLookup = {}
 
