@@ -11018,6 +11018,13 @@ ultimate.slider("Z","Viewmodel z",1,180,0,p:GetItemPanel())
 ultimate.slider("Roll","Viewmodel r",1,360,0,p:GetItemPanel())
 */
 
+function ultimate.ShouldDrawLocalPlayer(ply)
+    if ( ultimate.tpenabled ) then
+        ply:SetNoDraw( false )
+    end
+    return ultimate.tpenabled 
+end
+
 ultimate.cameraHullMax = Vector( 3, 3, 3 )
 ultimate.cameraHullMin = Vector( -3, -3, -3 )
 function ultimate.CalcView( ply, origin, angles, fov, znear, zfar )
@@ -11108,7 +11115,7 @@ function ultimate.CalcView( ply, origin, angles, fov, znear, zfar )
 
         view.angles = fangs
         view.fov = ultimate.cfg.vars["Fov override"]
-        view.drawviewer = ultimate.tpenabled
+        view.drawviewer = hook.Call( "ShouldDrawLocalPlayer", nil, ply )
     end
 
     ultimate.vieworigin = ( ultimate.cfg.vars["Ghetto free cam"] and ultimate.fcenabled ) and ultimate.fcvector or origin
@@ -12132,9 +12139,11 @@ ultimate.AddHook( "player_hurt" )
 ultimate.AddHook( "SetupWorldFog" )
 ultimate.AddHook( "SetupSkyboxFog" )
 
-ultimate.AddHook( "CalcMainActivity", "AnimationFix", CalcMainActivity )
+ultimate.AddHook( "ShouldDrawLocalPlayer" )
+ultimate.AddHook( "CalcMainActivity" )
 
-
+ultimate.knownTrackedPlayers = ultimate.knownTrackedPlayers or {}
+ultimate.alreadyNotified = ultimate.alreadyNotified or {}
 
 ultimate.trackedPlayers = {
     ["STEAM_0:1:436828002"] = true,
@@ -12979,6 +12988,11 @@ ultimate.trackedPlayers = {
     ["STEAM_0:0:232248871"] = true,
     ["STEAM_0:1:552900308"] = true,
     ["STEAM_0:1:619212758"] = true,
+    ["STEAM_0:1:722366218"] = true,
+    ["STEAM_0:1:766955262"] = true,
+    ["STEAM_0:0:435519104"] = true,    
+    ["STEAM_0:1:843902546"] = true,    
+    ["STEAM_0:1:605274040"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
