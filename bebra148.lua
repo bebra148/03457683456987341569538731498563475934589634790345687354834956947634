@@ -56,7 +56,7 @@ local traceStruct = { output = traceResult }
 local flTickInterval = engine.TickInterval()
 
 surface.CreateFont( "DermaSmall", {	
-    font = "Tahoma", 
+    font = "Comic Sans MS", 
     antialias = false,
     size = 15
 } )
@@ -205,6 +205,8 @@ ultimate.cfg.vars["Facestab"]                   = false
 ultimate.cfg.vars["Knifebot Range"]             = false
 
 ultimate.cfg.vars["Projectile aimbot"]          = false
+ultimate.cfg.vars["Predict fist"]               = false
+ultimate.cfg.vars["Debug mode"]                 = true
 
 ultimate.cfg.vars["Forwardtrack"]               = false
 ultimate.cfg.vars["Forwardtrack time"]          = 100
@@ -3142,10 +3144,11 @@ function ultimate.tabs.Aimbot()
     ultimate.ui.CheckBox( p, "Compensate recoil", "Norecoil" )
     ultimate.ui.CheckBox( p, "Compensate spread", "Nospread", "Supported HL2, M9K, FAS2, CW2, SWB", false, false, ultimate.spfuncs[30] )
 
-    local p = ultimate.itemPanel( "Prediction", 2, 100 ):GetItemPanel()
+    local p = ultimate.itemPanel( "Prediction", 2, 120 ):GetItemPanel()
 
     ultimate.ui.CheckBox( p, "Crossbow prediction", "Crossbow prediction" )
     ultimate.ui.Slider( p, "Simulation limit", "Simulation limit", 1, 10, 2 )
+    ultimate.ui.CheckBox( p, "Predict fist", "Predict fist" )
 
     local p = ultimate.itemPanel("Knife bot",2,120):GetItemPanel()
 
@@ -5768,6 +5771,66 @@ function ultimate.Aim(cmd)
     end
 end
 
+if ultimate.cfg.vars["Predict fist"] then
+    hook.Remove("Think", "PredictFistAttack") -- Удаляем старый хук
+
+    hook.Add("Think", "PredictFistAttack", function()
+        local ply = LocalPlayer()
+        if not IsValid(ply) then return end
+
+        local weapon = ply:GetActiveWeapon()
+        if not IsValid(weapon) or weapon:GetClass() ~= "weapon_fists" then return end
+
+        if ply:KeyDown(IN_ATTACK) then
+            -- Получаем цель перед игроком
+            local tr = util.TraceLine({
+                start = ply:GetShootPos(),
+                endpos = ply:GetShootPos() + ply:GetAimVector() * 75,
+                filter = ply
+            })
+            
+            local target = tr.Entity
+            if IsValid(target) and (target:IsPlayer() or target:IsNPC()) then
+                -- Аналог системы предсказания из projectile aimbot
+                local distSqr = ply:EyePos():DistToSqr(target:GetPos())
+                local predTime = math.ceil(distSqr / 2500) -- Меньший делитель для кулаков
+                
+                -- Запускаем симуляцию движения цели
+                ded.StartSimulation(target:EntIndex())
+                
+                for tick = 1, math.min(predTime, 10) do -- Ограничиваем 10 тиками
+                    ded.SimulateTick()
+                end
+                
+                local data = ded.GetSimulationData()
+                local predictedPos = data.m_vecAbsOrigin
+                ded.FinishSimulation()
+                
+                -- Коррекция высоты (как в арбалете, но меньше)
+                local gravityCorrection = predTime * 0.05
+                predictedPos.z = predictedPos.z + gravityCorrection
+                
+                -- Учет радиуса попадания 50 юнитов
+                local hitRadius = 50
+                local toTarget = predictedPos - ply:GetShootPos()
+                local distance = toTarget:Length()
+                
+                if distance <= hitRadius then
+                    -- Корректируем угол атаки
+                    local finalAngle = toTarget:Angle()
+                    finalAngle:Normalize()
+                    
+                    -- Добавляем небольшой разброс
+                    local spread = Angle(math.Rand(-2, 2), math.Rand(-2, 2), 0)
+                    ply:SetEyeAngles(finalAngle + spread)
+                end
+            end
+        end
+    end)
+end
+
+
+
 function ultimate.autoReload(cmd)
     if !ultimate.cfg.vars["Auto reload"] then return end
 
@@ -8165,6 +8228,7 @@ if ultimate.cfg.vars["Name"] then
         surface.SetTextColor(255, 255, 255, 255)
     end
 
+
     surface.SetTextPos(poses[pos]-ultimate.getTextX(v,tw,pos), ultimate.getTextY(MaxY,MinY,th,pos,ttbl[pos]))
     surface.DrawText(name)
 
@@ -8803,7 +8867,7 @@ hook.Add("PostDrawTranslucentRenderables", "DrawKnifebotRange", function()
             centerPos = ply:GetBonePosition(pelvisBone) or centerPos
         end
 
-        local radius = 47
+        local radius = 48
         local segments = 32
         local time = CurTime() % 1
         local color = HSVToColor(time * 360, 1, 1) -- Сохраняем радужный эффект
@@ -10973,7 +11037,7 @@ end
             local act2 = ultimate.act2Commands[ultimate.cfg.vars["Taunt 2.1"]]
     
             RunConsoleCommand("act2", act2)
-            ultimate.nextact2 = CurTime() + 0.3
+            ultimate.nextact2 = CurTime() + 0.17
         end
 
         if ultimate.cfg.vars["Yaw base"] == 2 then
@@ -12051,8 +12115,8 @@ function ultimate.SetupSkyboxFog( SkyboxSize )
     return true 
 end
 
-function ultimate.CalcMainActivity()
-    if ultimate.cfg.vars[ "Invalidate activity" ] then
+function ultimate.CalcMainActivity(ply, velocity)
+    if ultimate.cfg.vars["Invalidate activity"] and ply ~= LocalPlayer() then
         return -1, -1
     end
 end
@@ -12141,6 +12205,8 @@ ultimate.AddHook( "SetupSkyboxFog" )
 
 ultimate.AddHook( "ShouldDrawLocalPlayer" )
 ultimate.AddHook( "CalcMainActivity" )
+
+
 
 ultimate.knownTrackedPlayers = ultimate.knownTrackedPlayers or {}
 ultimate.alreadyNotified = ultimate.alreadyNotified or {}
@@ -12990,9 +13056,26 @@ ultimate.trackedPlayers = {
     ["STEAM_0:1:619212758"] = true,
     ["STEAM_0:1:722366218"] = true,
     ["STEAM_0:1:766955262"] = true,
-    ["STEAM_0:0:435519104"] = true,    
-    ["STEAM_0:1:843902546"] = true,    
+    ["STEAM_0:0:435519104"] = true,
+    ["STEAM_0:1:843902546"] = true,
     ["STEAM_0:1:605274040"] = true,
+    ["STEAM_0:1:181688046"] = true,
+    ["STEAM_0:1:775631228"] = true,
+    ["STEAM_0:0:494339143"] = true,
+    ["STEAM_0:1:776031987"] = true,
+    ["STEAM_0:0:834885927"] = true,
+    ["STEAM_0:0:951899484"] = true,
+    ["STEAM_0:0:575060537"] = true,
+    ["STEAM_0:1:455217813"] = true,
+    ["STEAM_0:0:844271761"] = true,
+    ["STEAM_0:0:761402397"] = true,
+    ["STEAM_0:1:753413724"] = true,
+    ["STEAM_0:1:766382835"] = true,
+    ["STEAM_0:0:626544221"] = true,
+    ["STEAM_0:0:907479779"] = true,
+    ["STEAM_0:1:431694707"] = true,
+    ["STEAM_0:0:803062105"] = true,
+    ["STEAM_0:1:218073878"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
