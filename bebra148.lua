@@ -230,6 +230,7 @@ ultimate.cfg.vars["Resolver"] = false
 ultimate.cfg.vars["Yaw mode"] = 1
 ultimate.cfg.vars["Pitch resolver"] = false
 ultimate.cfg.vars["Taunt resolver"] = false
+ultimate.cfg.vars["Memory bullets"] = false
 
 
 
@@ -285,7 +286,7 @@ ultimate.cfg.vars["Jitter delta"]               = 45
 ultimate.cfg.vars["Low delta value"]            = 0
 ultimate.cfg.vars["Switch time"]                = 0.6
 
-
+ultimate.cfg.vars["Anti-BruteForce"]            = false
 
 ultimate.cfg.vars["Yaw base"]                   = 1
 ultimate.presets["Yaw base"] = { "Viewangles", "At targets" }
@@ -300,7 +301,8 @@ ultimate.presets["Yaw"] = {
     "Hand Block", "Low delta",
     "Desync", "Tank AA", "Fake switch",
     "Dolphin Mode", "Freeze Frame",
-    "Invisible Man", "Matrix Glitch"
+    "Invisible Man", "Matrix Glitch",
+    "Unhittable", "Unhittable2"
 }
 ultimate.cfg.vars["Pitch"]                      = 1
 ultimate.presets["Pitch"] = { 
@@ -3224,6 +3226,7 @@ function ultimate.tabs.Rage()
     ultimate.ui.CheckBox( p, "Yaw randomisation", "Yaw randomisation" )
     ultimate.ui.CheckBox( p, "Freestanding", "Freestanding" )
     ultimate.ui.CheckBox( p, "Micromovement", "Micromovement" )
+    ultimate.ui.CheckBox( p, "Anti BruteForce", "Anti-BruteForce" )
 
     local p = ultimate.itemPanel( "Custom angles", 1, 570 ):GetItemPanel()
 
@@ -3302,6 +3305,7 @@ function ultimate.tabs.Rage()
     ultimate.ui.CheckBox( p, "Resolver", "Resolver" )
     ultimate.ui.CheckBox( p, "Pitch resolver", "Pitch resolver" )
     ultimate.ui.CheckBox( p, "Taunt resolver", "Taunt resolver" )
+    ultimate.ui.CheckBox( p, "Memory bullets", "Memory bullets" )    
     --ultimate.ui.Slider( p, "Resolver max misses", "Resolver max misses", 0, 10, 0 )
     ultimate.ui.Slider( p, "add delta", "add delta", -180, 180, 0 )
     --ultimate.ui.Slider( p, "add pitch", "add pitch", -90, 90, 0 )
@@ -5748,6 +5752,10 @@ function ultimate.Aim(cmd)
         pLocalPlayer.simtime_updated = true
         ded.UpdateClientAnimation( pLocalPlayer:EntIndex() )
 
+        if ultimate.cfg.vars["Resolver"] or ultimate.cfg.vars["Memory bullets"] then 
+            ply.aimshots = (ply.aimshots or 0) + 1
+        end
+
         local isAutomatic = true
 
         if ultimate.activeWeapon.Primary then
@@ -6640,6 +6648,164 @@ ultimate.CalcYaw = {
         }
         
         return angles[glitch_factor + 1]
+    end,
+
+    // Unhittable
+    [26] = function(cmd)
+        local send = ultimate.SendPacket
+        local baseyaw = ultimate.GetBaseYaw()
+        local inverter = ultimate.cfg.vars["Inverter"]
+        
+        -- настройки углов
+        local realAngle = ultimate.cfg.vars["Real Angle"] or 124
+        local fakeAngle = ultimate.cfg.vars["Fake Angle"] or -47
+        
+        -- динамический джиттер
+        local jitterRange = ultimate.cfg.vars["Jitter Range"] or 12 
+        local jitter = math.random(-jitterRange, jitterRange)
+        
+        -- микро-движения
+        local microTicks = (CurTime() * 100) % 360
+        local microJitter = math.sin(microTicks * 0.1) * 15
+        
+        -- временные модификации
+        local timeSwitch = (CurTime() * 3) % 2 > 1
+        local timeMod = math.sin(CurTime() * 5) * 20
+        
+        -- рассчитываем real и fake
+        local realYaw = baseyaw + (inverter and -realAngle or realAngle)
+        local fakeYaw = baseyaw + (inverter and fakeAngle or -fakeAngle) + jitter + microJitter
+        
+        -- дополнительные модификации для fake
+        if timeSwitch then 
+            fakeYaw = fakeYaw + timeMod + math.random(-25, 25)
+        end
+        
+        -- случайная инверсия каждые 0.3 секунды
+        if math.floor(CurTime() * 3.33) % 2 == 0 then
+            fakeYaw = fakeYaw + math.random(-35, 35)
+        end
+        
+        -- адаптивный режим - анализ врагов
+        if ultimate.cfg.vars["Adaptive Mode"] then
+            local enemies = {}
+            local myPos = me:GetPos()
+            
+            for _, ply in pairs(player.GetAll()) do
+                if IsValid(ply) and ply ~= me and ply:Alive() then
+                    local dist = myPos:Distance(ply:GetPos())
+                    if dist < 1500 then
+                        local angleToEnemy = (ply:GetPos() - myPos):Angle().yaw
+                        table.insert(enemies, {angle = angleToEnemy, dist = dist})
+                    end
+                end
+            end
+            
+            if #enemies > 0 then
+                -- находим среднюю позицию врагов
+                local avgAngle = 0
+                for _, enemy in pairs(enemies) do
+                    avgAngle = avgAngle + enemy.angle
+                end
+                avgAngle = avgAngle / #enemies
+                
+                -- корректируем fake относительно врагов
+                fakeYaw = avgAngle + 180 + math.random(-40, 40)
+            end
+        end
+        
+        -- фактор скорости
+        if ultimate.cfg.vars["Velocity Factor"] then
+            local velocity = me:GetVelocity():Length()
+            if velocity > 100 then
+                local speedMod = math.min(velocity / 300, 1.5)
+                fakeYaw = fakeYaw + (math.random(-30, 30) * speedMod)
+            end
+        end
+        
+        -- нормализация углов
+        realYaw = math.NormalizeAngle(realYaw)
+        fakeYaw = math.NormalizeAngle(fakeYaw)
+        
+        -- возвращаем соответствующий угол
+        return send and realYaw or fakeYaw
+    end,
+    // Unhittable2
+    [27] = function(cmd)
+        local send = ultimate.SendPacket
+        local baseyaw = ultimate.GetBaseYaw()
+        local inverter = ultimate.cfg.vars["Inverter"]
+        local me = LocalPlayer()
+        if not IsValid(me) then return baseyaw end
+
+        -- ══════════ ▼ CFG ══════════
+        local realAngle = inverter and -155 or 110
+        local fakeBase = inverter and 42 or -45
+        local jitterRange = 26
+        local microPower = 11
+        local oscStrength = 25
+        local velocityMod = 30
+        local timeSeed = math.floor(CurTime() * 4) % 2 == 0 and 1 or -1
+        -- ══════════════════════════
+
+        -- ▼ Jitter (динамический, seeded)
+        local jitter = math.random(-jitterRange, jitterRange) * timeSeed
+
+        -- ▼ Micro jitter (синус/косинус шум)
+        local time = CurTime()
+        local micro = math.sin(time * 3) * microPower + math.cos(time * 6.8) * (microPower * 0.6)
+
+        -- ▼ Fake Oscillation
+        local osc = math.sin(time * 2.4) * oscStrength
+
+        -- ▼ Adaptive Target Correction
+        if ultimate.cfg.vars["Adaptive Mode"] then
+            local myPos = me:GetPos()
+            local enemies = {}
+            for _, ply in ipairs(player.GetAll()) do
+                if IsValid(ply) and ply:Alive() and ply ~= me then
+                    local dist = myPos:Distance(ply:GetPos())
+                    if dist < 1500 then
+                        table.insert(enemies, (ply:GetPos() - myPos):Angle().yaw)
+                    end
+                end
+            end
+            if #enemies > 0 then
+                local avg = 0
+                for _, a in ipairs(enemies) do avg = avg + a end
+                avg = avg / #enemies
+                fakeBase = (avg - baseyaw + 180 + math.random(-35, 35))
+            end
+        end
+
+        -- ▼ Velocity Compensation
+        if ultimate.cfg.vars["Velocity Factor"] then
+            local vel = me:GetVelocity():Length2D()
+            if vel > 120 then
+                fakeBase = fakeBase + math.sin(time * 10) * velocityMod
+            end
+        end
+
+        -- ▼ Pitch Spoofing (для фейка)
+        if ultimate.cfg.vars["AntiAim Pitch"] then
+            cmd:SetViewAngles(Angle(89, cmd:GetViewAngles().y, 0)) -- имитируем pitch
+        end
+
+        -- ▼ LBY Breaker-like spin (фейк)
+        if math.floor(time * 3.5) % 3 == 0 then
+            fakeBase = fakeBase + math.random(-90, 90)
+        end
+
+        -- ▼ Flip Fake
+        if math.floor(time * 2.25) % 2 == 0 then
+            fakeBase = fakeBase * -1
+        end
+
+        -- ▼ Финальные углы
+        local realYaw = math.NormalizeAngle(baseyaw + realAngle)
+        local fakeYaw = math.NormalizeAngle(baseyaw + fakeBase + jitter + micro + osc)
+
+        return send and realYaw or fakeYaw
     end
 
 
@@ -6802,6 +6968,130 @@ if ultimate.cfg.vars["Jitter"] == 2 and ultimate.SendPacket then
         if ultimate.SendPacket then
             ultimate.SwaySide = ultimate.SwaySide * -1 
         end
+
+        ultimate.bruteAngles = { 75, -75, 20, -20, 145, -145, 153, -153, 0, 23, -23, 33, -33, 110, -110 }
+        ultimate.bruteIndex = 1
+        ultimate._lastAngleChange = 0
+        ultimate._angleChangeInterval = 0.1 -- Базовый интервал
+        ultimate._randomFactor = 0.05 -- Случайное отклонение интервала
+
+        if ultimate.cfg.vars["Anti-BruteForce"] then
+            -- Основной хук анти-брутфорса
+            hook.Add("Think", "Ultimate_AntiBrute_ResolverProtect", function()
+                if not ultimate.cfg.vars["Anti-BruteForce"] then return end
+                if not IsValid(LocalPlayer()) then return end
+                
+                local curTime = CurTime()
+                
+                -- Проверяем, находимся ли мы в паузе
+                if ultimate._isPaused then
+                    if curTime >= ultimate._pauseEndTime then
+                        ultimate._isPaused = false
+                    else
+                        return -- Пропускаем выполнение во время паузы
+                    end
+                end
+                
+                -- Проверяем интервал смены углов
+                if curTime < ultimate._lastAngleChange + ultimate._angleChangeInterval then 
+                    return 
+                end
+                
+                -- Получаем текущие углы игрока
+                local currentAngles = LocalPlayer():EyeAngles()
+                
+                -- Выбираем новый угол
+                local newYaw
+                local attempts = 0
+                
+                repeat
+                    ultimate.bruteIndex = math.random(1, #ultimate.bruteAngles)
+                    newYaw = ultimate.bruteAngles[ultimate.bruteIndex]
+                    attempts = attempts + 1
+                until newYaw ~= ultimate._lastYaw or attempts > 5 -- Избегаем повторения того же угла
+                
+                -- Добавляем случайное отклонение
+                local variation = (math.random() - 0.5) * 2 * 0.8 -- ±0.8 градусов
+                newYaw = newYaw + variation
+                
+                -- Нормализуем угол
+                newYaw = newYaw % 360
+                
+                -- Создаем новый угол
+                local newAngle = Angle(currentAngles.p, newYaw, currentAngles.r)
+                
+                -- Применяем угол
+                LocalPlayer():SetEyeAngles(newAngle)
+                
+                -- Сохраняем последний угол
+                ultimate._lastYaw = newYaw
+                
+                -- Обновляем время следующего изменения с случайным интервалом
+                ultimate._lastAngleChange = curTime
+                ultimate._angleChangeInterval = 0.06 + math.random() * ultimate._randomFactor
+            end)
+            
+            -- Защита от обнаружения: случайные паузы
+            hook.Add("Think", "Ultimate_AntiBrute_RandomPause", function()
+                if not ultimate.cfg.vars["Anti-BruteForce"] then return end
+                if ultimate._isPaused then return end
+                
+                -- Более редкие, но более реалистичные паузы
+                if math.random() < 0.002 then -- 0.2% шанс паузы
+                    ultimate._isPaused = true
+                    ultimate._pauseEndTime = CurTime() + math.random(0.15, 0.4) -- Пауза 0.15-0.4 секунды
+                end
+            end)
+            
+            -- Адаптивная система: меняем интервалы в зависимости от ситуации
+            hook.Add("Think", "Ultimate_AntiBrute_Adaptive", function()
+                if not ultimate.cfg.vars["Anti-BruteForce"] then return end
+                if not IsValid(LocalPlayer()) then return end
+                
+                local ply = LocalPlayer()
+                
+                -- Если игрок движется, увеличиваем частоту смены углов
+                if ply:GetVelocity():Length() > 50 then
+                    ultimate._randomFactor = 0.08 -- Более быстрая смена при движении
+                else
+                    ultimate._randomFactor = 0.05 -- Стандартная скорость
+                end
+                
+                -- Если игрок прицеливается, временно приостанавливаем
+                if ply:KeyDown(IN_ATTACK2) then
+                    ultimate._lastAngleChange = CurTime() + 0.2 -- Пауза при прицеливании
+                end
+            end)
+            
+            -- Дополнительная защита: имитация естественного поведения
+            hook.Add("Think", "Ultimate_AntiBrute_NaturalBehavior", function()
+                if not ultimate.cfg.vars["Anti-BruteForce"] then return end
+                if not IsValid(LocalPlayer()) then return end
+                
+                -- Случайно "сбрасываем" систему, имитируя естественное поведение
+                if math.random() < 0.001 then -- 0.1% шанс
+                    ultimate.bruteIndex = 1
+                    ultimate._angleChangeInterval = 0.08
+                end
+                
+                -- Периодически меняем массив углов
+                if math.random() < 0.0005 then -- 0.05% шанс
+                    -- Перемешиваем массив углов
+                    for i = #ultimate.bruteAngles, 2, -1 do
+                        local j = math.random(1, i)
+                        ultimate.bruteAngles[i], ultimate.bruteAngles[j] = ultimate.bruteAngles[j], ultimate.bruteAngles[i]
+                    end
+                end
+            end)
+            
+        else
+            -- Удаляем хуки если анти-брутфорс выключен
+            hook.Remove("Think", "Ultimate_AntiBrute_ResolverProtect")
+            hook.Remove("Think", "Ultimate_AntiBrute_RandomPause")
+            hook.Remove("Think", "Ultimate_AntiBrute_Adaptive")
+            hook.Remove("Think", "Ultimate_AntiBrute_NaturalBehavior")
+        end
+
 
         baseyaw = ultimate.GetBaseYaw()
         pitch = CalcPitch()
@@ -8922,205 +9212,34 @@ function ultimate.togglevisible()
     end
 end
 
-ultimate.resolver = {
+function ultimate.PrePlayerDraw( pEntity, iFlags )
+    if ( pEntity == pLocalPlayer ) then
+        return 
+    end
 
-    maxMissCount = 3,
-    angleMemoryTime = 5,
-    historySize = 8,
-    updateInterval = 0.3,
-    
-    -- Типы анти-аймов
-    AntiAimTypes = {
-        NONE = 0,
-        JITTER = 1,
-        SPIN = 2,
-        STATIC = 3,
-        LBY = 4
-    }
-}
+    pEntity:AnimResetGestureSlot( GESTURE_SLOT_VCD )
+    pEntity:AnimResetGestureSlot( GESTURE_SLOT_CUSTOM )
 
--- Глобальные данные
-ultimate.playerData = ultimate.playerData or {}
-ultimate.shotData = ultimate.shotData or {
-    lastShotTime = 0,
-    lastShotAngle = Angle(0,0,0),
-    hitConfirmed = false
-}
+    pEntity:SetPoseParameter( "head_pitch", 0 )
+    pEntity:SetPoseParameter( "head_yaw", 0 )
 
--- =============================================
--- Основные функции
--- =============================================
+    if ( ultimate.cfg.vars["Resolver"] ) then
+        local angs = Angle()
+        angs.y = ultimate.bruteYaw[ pEntity.aimshots % #ultimate.bruteYaw + 1 ] + pEntity:EyeAngles().y
 
--- Проверка включен ли ресольвер
-local function IsResolverEnabled()
-    return ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Resolver"]
-end
+        pEntity:SetRenderAngles( angs )
 
--- Определение использует ли игрок анти-аим
-local function IsUsingAntiAim(target)
-    if not IsResolverEnabled() then return false end
-    if not IsValid(target) or target:IsBot() then return false end
-    
-    local ang = target:EyeAngles()
-    local data = ultimate.playerData[target] or {}
-    
-    -- Проверка вертикального анти-айма
-    if math.abs(ang.p) > 89 then return true end
-    if math.abs(ang.p) < 1 and target:GetVelocity():Length() > 10 then return true end
-    
-    -- Проверка горизонтального анти-айма
-    if #(data.angleHistory or {}) >= 3 then
-        local changes = {}
-        for i = 2, #data.angleHistory do
-            table.insert(changes, math.AngleDifference(data.angleHistory[i], data.angleHistory[i-1]))
-        end
-        
-        for _, change in ipairs(changes) do
-            if math.abs(change) > 35 then return true end
-        end
+        ded.SetCurrentLowerBodyYaw( pEntity:EntIndex(), angs.y )  
+    end
+
+    if ( ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch ) then
+        pEntity:SetPoseParameter( "aim_pitch", -89 )
+        pEntity:SetPoseParameter( "head_pitch", -89 )
     end
     
-    -- Проверка LBY
-    local lby = target:GetPoseParameter("body_yaw") or 0
-    if math.abs(math.AngleDifference(ang.y, lby)) > 60 then return true end
-    
-    return false
-end
-
--- Обновление истории углов
-local function UpdateAngleHistory(target)
-    if not IsResolverEnabled() then return end
-    if not IsValid(target) then return end
-    
-    local data = ultimate.playerData[target] or {}
-    local ang = target:EyeAngles()
-    
-    -- Сохраняем историю углов
-    data.angleHistory = data.angleHistory or {}
-    table.insert(data.angleHistory, ang.y)
-    if #data.angleHistory > ultimate.resolver.historySize then
-        table.remove(data.angleHistory, 1)
-    end
-    
-    -- Определяем тип анти-айма
-    data.antiAimType = IsUsingAntiAim(target) and ultimate.resolver.AntiAimTypes.JITTER or ultimate.resolver.AntiAimTypes.NONE
-    
-    ultimate.playerData[target] = data
-end
-
--- Основная функция ресольва углов
-local function ResolveYaw(target)
-    if not IsResolverEnabled() then return nil end
-    if not IsValid(target) then return nil end
-    
-    local data = ultimate.playerData[target] or {}
-    local curTime = CurTime()
-    
-    -- Используем успешный угол если есть
-    if data.lastHitAngle and curTime - data.lastHitTime < ultimate.resolver.angleMemoryTime then
-        if (data.missCount or 0) < ultimate.resolver.maxMissCount then
-            return data.lastHitAngle
-        end
-    end
-    
-    -- Брутфорс углов
-    local bruteYaw = ultimate.resolver.bruteYaw
-    local bruteIndex = ((target.aimshots or 0) % #bruteYaw) + 1
-    return target:EyeAngles().y + bruteYaw[bruteIndex]
-end
-
--- =============================================
--- Хуки и обработчики событий
--- =============================================
-
--- Обработка попаданий
-hook.Add("EntityFireBullets", "ultimate.ResolverHitTrack", function(attacker, tr, dmginfo)
-    if not IsResolverEnabled() then return end
-    if attacker == LocalPlayer() and IsValid(tr.Entity) and tr.Entity:IsPlayer() then
-        local target = tr.Entity
-        local data = ultimate.playerData[target] or {}
-        
-        data.lastHitAngle = ultimate.shotData.lastShotAngle.y
-        data.lastHitTime = CurTime()
-        data.missCount = 0
-        
-        ultimate.playerData[target] = data
-        ultimate.shotData.hitConfirmed = true
-    end
-end)
-
--- Обработка выстрелов
-hook.Add("PlayerFireAnimationEvent", "ultimate.PlayerFire", function(ply, event, data)
-    if not IsResolverEnabled() then return end
-    if ply == LocalPlayer() and event == 22 then
-        ultimate.shotData.lastShotTime = CurTime()
-        ultimate.shotData.lastShotAngle = ply:EyeAngles()
-        ultimate.shotData.hitConfirmed = false
-        
-        -- Проверка промаха через 0.1 сек
-        timer.Simple(0.1, function()
-            if IsResolverEnabled() and not ultimate.shotData.hitConfirmed then
-                for _, target in pairs(player.GetAll()) do
-                    if target ~= ply and ultimate.playerData[target] then
-                        ultimate.playerData[target].missCount = (ultimate.playerData[target].missCount or 0) + 1
-                    end
-                end
-            end
-        end)
-    end
-end)
-
--- =============================================
--- Основная функция рендеринга
--- =============================================
-
-function ultimate.PrePlayerDraw(pEntity)
-    if not IsValid(pEntity) or pEntity == LocalPlayer() then return end
-    
-    -- Инициализация данных только при включенном ресольвере
-    if IsResolverEnabled() then
-        ultimate.playerData[pEntity] = ultimate.playerData[pEntity] or {
-            angleHistory = {},
-            antiAimType = ultimate.resolver.AntiAimTypes.NONE,
-            lastHitAngle = nil,
-            missCount = 0,
-            lastHitTime = 0,
-            lastUpdate = 0
-        }
-        
-        -- Обновляем историю углов
-        if (ultimate.playerData[pEntity].lastUpdate or 0) + ultimate.resolver.updateInterval < CurTime() then
-            UpdateAngleHistory(pEntity)
-            ultimate.playerData[pEntity].lastUpdate = CurTime()
-        end
-    end
-    
-    -- Получаем конечный угол
-    local finalYaw = IsResolverEnabled() and ResolveYaw(pEntity) or pEntity:EyeAngles().y
-    local renderAngles = Angle(0, finalYaw + (IsResolverEnabled() and (ultimate.cfg.vars["add delta"] or 0) or 0), 0)
-    
-    -- Применяем углы
-    pEntity:SetRenderAngles(renderAngles)
-    
-    -- Дополнительные эффекты ресольвера
-    if IsResolverEnabled() then
-        if ded and ded.SetCurrentLowerBodyYaw then
-            ded.SetCurrentLowerBodyYaw(pEntity:EntIndex(), renderAngles.y)
-        end
-        
-        if ultimate.cfg.vars["Pitch resolver"] and pEntity.fakepitch then
-            pEntity:SetPoseParameter("aim_pitch", -45)
-            pEntity:SetPoseParameter("head_pitch", -45)
-        end
-    end
-    
-    -- Стандартные операции рендеринга
-    pEntity:AnimResetGestureSlot(GESTURE_SLOT_VCD)
-    pEntity:AnimResetGestureSlot(GESTURE_SLOT_CUSTOM)
-    pEntity:SetPoseParameter("head_pitch", 0)
-    pEntity:SetPoseParameter("head_yaw", 0)
     pEntity:InvalidateBoneCache()
     pEntity:SetupBones()
+
     pEntity.ChatGestureWeight = 0
 end
 
@@ -11576,10 +11695,7 @@ end
 
 // Resolver 
 
-ultimate.resolver.bruteYaw = { 
-    0, 180, -120, 120, 90, -90, -45, 45, 15, -15, 30, -30, 60, -60, 
-    math.random(-180, 180), math.random(-180, 180) -- Добавляем немного рандома для сложности
-}
+ultimate.bruteYaw = { -180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180  }
 
 
 
@@ -11615,7 +11731,6 @@ do
     local missedTicks = 0
     local lastSimTime = 0
 
-    -- Константы этапов кадра
     local FRAME_START = 0
     local FRAME_NET_UPDATE_START = 1
     local FRAME_NET_UPDATE_POSTDATAUPDATE_START = 2
@@ -11624,155 +11739,200 @@ do
     local FRAME_RENDER_START = 5
     local FRAME_RENDER_END = 6
 
-    -- Флаги для проверки состояния игрока
-    local FL_ONGROUND = bit.lshift(1, 0)
-    local IN_LAG_COMPENSATION_TELEPORTED = 2
-
-    -- Локальная функция для безопасного выполнения
-    local function SafeCall(fn, ...)
-        local success, result = pcall(fn, ...)
-        return success and result or nil
-    end
-
-    function ultimate.PreFrameStageNotify(stage)
-        -- Проверка основных объектов
-        if not pLocalPlayer or not IsValid(pLocalPlayer) or not ded or not ultimate then 
-            return 
-        end
-
-        -- Проверяем включена ли экстраполяция
-        local extrapolationEnabled = SafeCall(function() 
-            return ultimate.cfg and ultimate.cfg.vars and ultimate.cfg.vars["Extrapolation"]
-        end)
-
-        -- Получаем всех игроков безопасно
-        local allPlayers = SafeCall(player.GetAll) or {}
+    function ultimate.PreFrameStageNotify( stage )
+        local plys = player.GetAll()
 
         if stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END then
-            -- Обновляем таблицу сущностей
-            SafeCall(ultimate.entTableUpdate)
 
-            -- Подготавливаем данные локального игрока
-            local orig = SafeCall(pLocalPlayer.GetNetworkOrigin, pLocalPlayer) or Vector(0,0,0)
-            local data = { orig }
-            SafeCall(ultimate.FillLocalNetworkData, data)
+            ultimate.entTableUpdate()
 
-            -- Обработка данных игроков
-            for _, v in ipairs(allPlayers) do
-                if not IsValid(v) or v:IsDormant() then continue end
+            plys = player.GetAll()
 
-                local cur_simtime = SafeCall(ded.GetSimulationTime, v:EntIndex()) or 0
-                local cur_pos = SafeCall(v.GetNetworkOrigin, v) or Vector(0,0,0)
+            local orig = pLocalPlayer:GetNetworkOrigin()
 
-                -- Инициализация данных игрока
+            local data = {}
+
+            data[1] = orig      // last networked origin
+
+            ultimate.FillLocalNetworkData( data )
+
+            for i = 1, #plys do
+                local v = plys[i]
+
+                //if !v.ult_prev_pos then continue end
+
+                local cur_simtime = ded.GetSimulationTime(v:EntIndex())
+                local cur_pos = v:GetNetworkOrigin()
+
+                --v.ult_cur_pos = cur_pos
+
                 if not v.ult_prev_simtime then
                     v.ult_prev_simtime = cur_simtime
                     v.ult_prev_pos = cur_pos
+                    // v.ult_prev_hitbox_pos = cur_pos
                     v.flticks = 0
                     v.missedanimticks = 0
                     v.simtime_updated = false 
                     v.break_lc = false
+
+                    ultimate.btrecords[ v ] = {}
+                    ultimate.predicted[ v ] = {}
+
                     v.aimshots = 0
-                    v.fakepitch = SafeCall(v.EyeAngles, v) and v:EyeAngles().p > 90 or false
+                    v.fakepitch = v:EyeAngles().p > 90
 
-                    -- Инициализация таблиц для бэктракинга
-                    ultimate.btrecords[v] = ultimate.btrecords[v] or {}
-                    ultimate.predicted[v] = ultimate.predicted[v] or {}
-                elseif v.ult_prev_simtime ~= cur_simtime then
-                    -- Обновление данных при изменении времени симуляции
-                    local flticks = math.Clamp(ultimate.TIME_TO_TICKS(cur_simtime - v.ult_prev_simtime), 1, 24)
+                elseif v.ult_prev_simtime != cur_simtime then
+                    local flticks = ultimate.TIME_TO_TICKS(cur_simtime-v.ult_prev_simtime)
 
-                    SafeCall(ded.SetMissedTicks, flticks)
-                    SafeCall(ded.AllowAnimationUpdate, true)
+                    // print(v,flticks )
 
-                    v.flticks = flticks
+                    ded.SetMissedTicks( flticks )
+                    ded.AllowAnimationUpdate( true )
+
+                    v.flticks = math.Clamp(flticks,1,24)
+
                     v.ult_prev_simtime = cur_simtime
+
                     v.break_lc = cur_pos:DistToSqr(v.ult_prev_pos) > 4096
+
+                    --if v.ult_prev_pos != v.ult_cur_pos then
                     v.ult_prev_pos = cur_pos
-                    v.fakepitch = SafeCall(v.EyeAngles, v) and v:EyeAngles().p > 90 or false
+
+                    // v.ult_prev_hitbox_pos = ultimate.getHitbox(v)
+                    --end 
+                    v.fakepitch = v:EyeAngles().p > 90
+
                     v.simtime_updated = true
                 else
                     v.simtime_updated = false
                 end
 
-                -- Запись данных для бэктракинга
-                if ultimate.canBacktrack and SafeCall(ultimate.canBacktrack, v) and v ~= pLocalPlayer and v.simtime_updated then
-                    SafeCall(ultimate.recordBacktrack, v)
+                if ultimate.canBacktrack(v) and v != pLocalPlayer and v.simtime_updated then
+                    ultimate.recordBacktrack(v)
                 end
 
-                -- Сброс данных бэктракинга при разрыве lag compensation
                 if v.break_lc then
-                    ultimate.btrecords[v] = {}
+                    ultimate.btrecords[ v ] = {}
                 end
-            end
-            
-            elseif stage == FRAME_RENDER_START and extrapolationEnabled then
-            -- Этап рендеринга - экстраполяция позиций (только если включена)
-            for _, v in ipairs(allPlayers) do
-                if not IsValid(v) or v == pLocalPlayer or v:IsDormant() then continue end
 
-                -- Проверка флага телепортации
-                local flags = SafeCall(v.GetEFlags, v) or 0
-                if bit.band(flags, IN_LAG_COMPENSATION_TELEPORTED) ~= 0 then continue end
-
-                if v.break_lc then
-                    -- Рассчитываем время предсказания с ограничениями
-                    local latencyIn = SafeCall(ded.GetLatency, 0) or 0
-                    local latencyOut = SafeCall(ded.GetLatency, 1) or 0
-                    local predTime = math.Clamp(latencyIn + latencyOut, 0, 0.2)
-                    local ticksToSimulate = math.Clamp(ultimate.TIME_TO_TICKS(predTime), 1, 12)
+                /*
+                if ultimate.cfg.vars["Extrapolation"] and v.simtime_updated and v != pLocalPlayer then
+                    -- Получаем текущую позицию игрока
+                    local currentPos = v:GetNetworkOrigin()
+                    local currentTime = ded.GetSimulationTime(v:EntIndex())
                     
-                    -- Получаем текущие данные игрока
-                    local currentPos = SafeCall(v.GetNetworkOrigin, v) or Vector(0,0,0)
-                    local velocity = SafeCall(v.GetVelocity, v) or Vector(0,0,0)
-                    local speed = velocity:Length()
-                    local isOnGround = bit.band(SafeCall(v.GetFlags, v) or 0, FL_ONGROUND) ~= 0
-
-                    -- Экстраполяция только для движущихся игроков
-                    if speed > 50 then
-                        if SafeCall(ded.StartSimulation, v:EntIndex()) then
-                            -- Устанавливаем начальные параметры для симуляции
-                            SafeCall(ded.SetSimulationData, currentPos, velocity, SafeCall(v.GetMoveType, v), isOnGround)
-                            
-                            -- Симулируем тики
-                            for _ = 1, ticksToSimulate do
-                                if not SafeCall(ded.SimulateTick) then break end
-                            end
-                            
-                            -- Получаем и применяем результаты
-                            local data = SafeCall(ded.GetSimulationData)
-                            if data and data.m_vecAbsOrigin then
-                                -- Проверяем, что новая позиция не слишком далеко
-                                if currentPos:DistToSqr(data.m_vecAbsOrigin) < 16384 then -- 128^2
-                                    SafeCall(v.SetRenderOrigin, v, data.m_vecAbsOrigin)
-                                    SafeCall(v.SetNetworkOrigin, v, data.m_vecAbsOrigin)
-                                end
-                            end
-                            
-                            SafeCall(ded.FinishSimulation)
-                        end
+                    -- Вычисляем время предсказания с ограничением
+                    local predTime = math.min(ded.GetLatency(0) + ded.GetLatency(1), 0.2) -- Максимум 200ms
+                    
+                    -- Проверяем, есть ли предыдущая позиция для сравнения
+                    if not v.ult_prev_pos then
+                        v.ult_prev_pos = currentPos
+                        v.ult_prev_time = currentTime
+                        return
                     end
-                end
-
-                if ultimate.cfg.vars["Forwardtrack"] then
-                    local predTime = (ded.GetLatency(0) + ded.GetLatency(1)) * ultimate.cfg.vars["Forwardtrack time"]
+                    
+                    -- Вычисляем скорость движения
+                    local timeDelta = currentTime - (v.ult_prev_time or currentTime)
+                    if timeDelta <= 0 then return end
+                    
+                    local velocity = (currentPos - v.ult_prev_pos) / timeDelta
+                    local speed = velocity:Length()
+                    
+                    -- Ограничиваем максимальную скорость для предотвращения телепортации
+                    local maxSpeed = 1000 -- Максимальная разумная скорость
+                    if speed > maxSpeed then
+                        velocity = velocity:GetNormalized() * maxSpeed
+                    end
+                    
+                    -- Начинаем симуляцию
                     ded.StartSimulation(v:EntIndex())
-        
-                    local prevPos = v:GetNetworkOrigin()
-                    for tick = 1, ultimate.TIME_TO_TICKS(predTime) do
+                    
+                    local predictedPos = currentPos
+                    local ticks = ultimate.TIME_TO_TICKS(predTime)
+                    
+                    -- Ограничиваем количество тиков
+                    ticks = math.min(ticks, 20) -- Максимум 20 тиков
+                    
+                    for tick = 1, ticks do
                         ded.SimulateTick()
                         local data = ded.GetSimulationData()
-                        debugoverlay.Line(prevPos, data.m_vecAbsOrigin, 0.1, color_white, true)
-                        prevPos = data.m_vecAbsOrigin
+                        
+                        -- Проверяем на разумность позиции
+                        local posChange = (data.m_vecAbsOrigin - predictedPos):Length()
+                        if posChange > 200 then -- Если изменение позиции слишком большое
+                            break -- Прерываем симуляцию
+                        end
+                        
+                        predictedPos = data.m_vecAbsOrigin
+                        debugoverlay.Cross(predictedPos, 6, 0.1, ultimate.Colors["Red"], true)
+                    end
+                    
+                    local finalData = ded.GetSimulationData()
+                    
+                    -- Дополнительная проверка на разумность финальной позиции
+                    local totalChange = (finalData.m_vecAbsOrigin - currentPos):Length()
+                    if totalChange > 500 then -- Если изменение слишком большое
+                        -- Используем линейную экстраполяцию вместо симуляции
+                        predictedPos = currentPos + velocity * predTime
+                    else
+                        predictedPos = finalData.m_vecAbsOrigin
+                    end
+                    
+                    -- Плавное смешивание между текущей и предсказанной позицией
+                    local blendFactor = math.min(predTime * 2, 1.0) -- Плавность смешивания
+                    local smoothedPos = currentPos + (predictedPos - currentPos) * blendFactor
+                    
+                    -- Устанавливаем позицию рендеринга
+                    v:SetRenderOrigin(smoothedPos)
+                    
+                    -- Обновляем debug информацию
+                    debugoverlay.Box(smoothedPos, v:OBBMins(), v:OBBMaxs(), 0.1, color_white)
+                    
+                    -- Сохраняем данные для следующего кадра
+                    v.ult_prev_pos = currentPos
+                    v.ult_prev_time = currentTime
+                    
+                    -- Обновляем таблицу предсказанных позиций
+                    local boneData = ultimate.GetBones(v)
+                    if boneData and boneData[1] then
+                        ultimate.predicted[v] = {
+                            pos = boneData[1],
+                            tick = ultimate.TIME_TO_TICKS(currentTime + predTime),
+                            confidence = math.max(0, 1 - (predTime * 2)) -- Уверенность в предсказании
+                        }
+                    end
+                    
+                    ded.FinishSimulation()
+                end
+                */
+
+                if ultimate.cfg.vars["Extrapolation"] and v.break_lc then
+                    local predTime = ded.GetLatency(0) + ded.GetLatency(1)
+                    ded.StartSimulation(v:EntIndex())
+        
+                    for tick = 1, ultimate.TIME_TO_TICKS(predTime) do
+                        ded.SimulateTick()
                     end
         
                     local data = ded.GetSimulationData()
+                    v:SetRenderOrigin(data.m_vecAbsOrigin)
+                    v:SetNetworkOrigin(data.m_vecAbsOrigin)
                     ded.FinishSimulation()
                 end
+
+            end
+        elseif stage == FRAME_RENDER_START then
+            plys = player.GetAll()
+
+            for i = 1, #plys do
+                local v = plys[i]
+
+                if v == pLocalPlayer then continue end
             end
         end
     end
 end
+
 
 function ultimate.PostFrameStageNotify( stage ) 
     if stage == 3 then
@@ -13141,5 +13301,55 @@ hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
         )
         ultimate.knownTrackedPlayers[ent] = nil
         ultimate.alreadyNotified[ent] = nil
+    end
+end)
+
+ultimate.memoryResolverData = ultimate.memoryResolverData or {}
+
+hook.Add("EntityFireBullets", "Ultimate_MemoryResolver_RecordShot", function(ent, data)
+    if not ent:IsPlayer() or ent == LocalPlayer() then return end
+
+    local id = ent:SteamID()
+    ultimate.memoryResolverData[id] = ultimate.memoryResolverData[id] or {}
+
+    local yaw = ent:EyeAngles().y
+
+    -- Если попал
+    if data.Callback and data.Callback.Hit then
+        ultimate.memoryResolverData[id].hitYaw = yaw
+    else
+        ultimate.memoryResolverData[id].misses = (ultimate.memoryResolverData[id].misses or 0) + 1
+    end
+end)
+
+function ultimate.GetMemoryResolvedYaw(ply)
+    local id = ply:SteamID()
+    local data = ultimate.memoryResolverData[id]
+    if not data then return nil end
+
+    if data.hitYaw then
+        return data.hitYaw -- Возвращаем последний успешный угол
+    end
+
+    -- Брутфорс fallback
+    if data.misses and data.misses > 3 then
+        return math.random(-180, 180) -- рандом если много промахов
+    end
+
+    return nil
+end
+
+hook.Add("Think", "Ultimate_ApplyMemoryResolver", function()
+    if not ultimate.cfg.vars["Resolver"] then return end
+
+    for _, ply in ipairs(player.GetAll()) do
+        if ply == LocalPlayer() or not ply:Alive() then continue end
+
+        local memYaw = ultimate.GetMemoryResolvedYaw(ply)
+        if memYaw then
+            local ang = ply:GetAngles()
+            ang.y = memYaw
+            ply:SetAngles(ang)
+        end
     end
 end)
