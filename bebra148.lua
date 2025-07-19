@@ -722,6 +722,11 @@ ultimate.cfg.vars["Viewmodel y"] = 0
 ultimate.cfg.vars["Viewmodel z"] = 0
 ultimate.cfg.vars["Viewmodel r"] = 0
 
+ultimate.cfg.vars["Modelchanger"]   = false
+ultimate.cfg.vars["Modelchanger model"] = 1
+ultimate.cfg.vars["Player_modelchanger"] = false
+ultimate.cfg.vars["Player_modelchanger_agent"] = 1
+
 ultimate.cfg.vars["Ghost follower"] = false
 ultimate.cfg.vars["GFID"] = "SteamID"
 
@@ -3656,7 +3661,12 @@ function ultimate.tabs.Visuals()
     ultimate.ui.Slider( p, "Aspect ratio","Aspect ratio",0,2,3,function(val) RunConsoleCommand("r_aspectratio",val) end )
 
 
-    
+    local p = ultimate.itemPanel("model changer",3,100):GetItemPanel()
+
+    ultimate.ui.CheckBox( p, "ModelChanger player", "Modelchanger" )
+    ultimate.ui.ComboBox( p, "ModelChanger model", "Modelchanger model", {"astolfo","protogen","walter","rusk", "niko", "george droyd", "wooman", "mark", "furry", "boykisser", "adidas combine"} )
+    //ultimate.ui.CheckBox( p, "ModelChanger me", "Player_modelchanger") 
+    //ultimate.ui.ComboBox( p, "ModelChanger model", "Player_modelchanger_agent", {"charple","male_03","Gman","zombie"} )   
     
 
    
@@ -12207,6 +12217,71 @@ do
     end
 end
 
+hook.Add("PrePlayerDraw",  "WIP", function()
+	for k, v in ipairs(player.GetAll()) do
+        if ultimate.cfg.vars["Modelchanger"] then
+            LocalPlayer():InvalidateBoneCache()
+			LocalPlayer():SetSequence(LocalPlayer():GetSequence())
+            local state = LocalPlayer():GetPredictable()
+            LocalPlayer():SetPredictable(not state)
+            LocalPlayer():SetPredictable(state)
+            if ultimate.cfg.vars["Modelchanger model"] == 1 then
+                LocalPlayer():SetModel("models/cyanblue/fate_extella_link/astolfo/astolfo.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 2 then
+                LocalPlayer():SetModel("models/squids_pms/ocs/xani_protogen/xani_pm.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 3 then
+                LocalPlayer():SetModel("models/walter/playermodels/walter.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 4 then
+                LocalPlayer():SetModel("models/survivors/survivor_mechanic.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 5 then
+                LocalPlayer():SetModel("models/ray/nikoo/nikopm.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 6 then
+                LocalPlayer():SetModel("models/player/floyd/georgedroyd.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 7 then
+                LocalPlayer():SetModel("models/jazzmcfly/bgs/bgs.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 8 then
+                LocalPlayer():SetModel("models/invincible/mark/mark.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 9 then
+                LocalPlayer():SetModel("models/good/goob_outlined.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 10 then
+                LocalPlayer():SetModel("models/boykisser/boykisser.mdl")
+            elseif ultimate.cfg.vars["Modelchanger model"] == 11 then   
+                LocalPlayer():SetModel("models/adidas_combine/playermodel/adidas_combine.mdl")            
+            end
+            LocalPlayer():SetupBones()
+        end
+        /*if ultimate.cfg.vars["Player_modelchanger"] then
+            v:InvalidateBoneCache()	
+            v:SetupBones()
+            if ultimate.cfg.vars["Player_modelchanger_agent"] == 1 then
+                v:InvalidateBoneCache()	
+                v:SetupBones()
+                v:SetModel("models/player/charple.mdl")
+            elseif ultimate.cfg.vars["Player_modelchanger_agent"] == 2 then
+                v:InvalidateBoneCache()	
+                v:SetupBones()
+                v:SetModel("models/player/Group01/male_03.mdl")
+            elseif ultimate.cfg.vars["Player_modelchanger_agent"] == 3 then
+                v:InvalidateBoneCache()	
+                v:SetupBones()
+                v:SetModel("models/player/gman_high.mdl")
+            elseif ultimate.cfg.vars["Player_modelchanger_agent"] == 4 then
+                v:InvalidateBoneCache()	
+                v:SetupBones()
+                v:SetModel("models/player/zombie_classic.mdl")
+                elseif ultimate.cfg.vars["Player_modelchanger_agent"] == 5 then
+                v:InvalidateBoneCache()    
+                v:SetupBones()
+                v:SetModel("models/player/Astolfo.mdl")
+            end			
+        end*/
+    
+    end
+		
+	
+end)
+
+
 function ultimate.PostDrawEffects()
     if ultimate.UnSafeFrame then return end
     if not ultimate.cfg.vars["Player outline"] and not ultimate.cfg.vars["Entity outline"] then return end
@@ -13261,28 +13336,31 @@ ultimate.trackedPlayers = {
 ["STEAM_0:0:924152622"] = true,
 ["STEAM_0:0:629027852"] = true,
 ["STEAM_0:0:450174583"] = true,
-["STEAM_0:0:939349847"] = true
+["STEAM_0:0:939349847"] = true,
+["STEAM_0:0:764280919"] = true,
+["STEAM_0:1:832948563"] = true,
+["STEAM_0:1:558038790"] = true,
+["STEAM_0:0:623037873"] = true,
+["STEAM_0:1:79509711"] = true,
+["STEAM_0:1:535068254"] = true,
+["STEAM_0:1:648331689"] = true,
 }
 
 hook.Add("PlayerConnect", "Ultimate_TrackPlayerConnect", function(name, ip)
     
 end)
 
--- Проверка игрока
 local function IsPlayerTracked(ply)
     if not IsValid(ply) then return false end
     local sid = ply:SteamID()
     return sid and ultimate.trackedPlayers[sid]
 end
 
--- Уведомление о входе + добавление в target list
 hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shouldTransmit)
     if not shouldTransmit or not IsValid(ent) or not ent:IsPlayer() then return end
     if IsPlayerTracked(ent) then
-        -- Добавление в priorityList
         ultimate.cfg.priorityList[ent:SteamID()] = true
         
-        -- Уведомление о входе
         ultimate.knownTrackedPlayers[ent] = true
         if not ultimate.alreadyNotified[ent] then
             ultimate.alreadyNotified[ent] = true
@@ -13296,15 +13374,12 @@ hook.Add("NotifyShouldTransmit", "Ultimate_TrackPlayerJoin", function(ent, shoul
     end
 end)
 
--- Проверка существующих игроков + добавление в target list
 hook.Add("InitPostEntity", "Ultimate_InitialCheck", function()
     timer.Simple(5, function()
         for _, ply in ipairs(player.GetAll()) do
             if IsValid(ply) and IsPlayerTracked(ply) then
-                -- Добавление в priorityList
                 ultimate.cfg.priorityList[ply:SteamID()] = true
                 
-                -- Уведомление
                 if not ultimate.alreadyNotified[ply] then
                     ultimate.alreadyNotified[ply] = true
                     chat.AddText(
@@ -13317,7 +13392,6 @@ hook.Add("InitPostEntity", "Ultimate_InitialCheck", function()
     end)
 end)
 
--- Уведомление о выходе
 hook.Add("EntityRemoved", "Ultimate_TrackPlayerLeave", function(ent)
     if not IsValid(ent) or not ent:IsPlayer() then return end
     if ultimate.knownTrackedPlayers[ent] then
@@ -13340,7 +13414,6 @@ hook.Add("EntityFireBullets", "Ultimate_MemoryResolver_RecordShot", function(ent
 
     local yaw = ent:EyeAngles().y
 
-    -- Если попал
     if data.Callback and data.Callback.Hit then
         ultimate.memoryResolverData[id].hitYaw = yaw
     else
@@ -13354,12 +13427,11 @@ function ultimate.GetMemoryResolvedYaw(ply)
     if not data then return nil end
 
     if data.hitYaw then
-        return data.hitYaw -- Возвращаем последний успешный угол
+        return data.hitYaw 
     end
 
-    -- Брутфорс fallback
     if data.misses and data.misses > 3 then
-        return math.random(-180, 180) -- рандом если много промахов
+        return math.random(-180, 180) 
     end
 
     return nil
