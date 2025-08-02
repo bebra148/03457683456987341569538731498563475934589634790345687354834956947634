@@ -8928,7 +8928,7 @@ do
         if ultimate.cfg.vars["WaterMark"] then
 
             local playerName = IsValid(pLocalPlayer) and pLocalPlayer:Name() or "DISCONNECTED"
-            local txt = "PROTOGEN.S3X  ◆  " .. playerName .. "  ◆  v3.0  ◆  UID:1"
+            local txt = "AK47HACK.PUB  ◆  " .. playerName .. "  ◆  v3.0  ◆  UID:1"
 
             -- Получаем размер текста
             surface.SetFont("Watermark_Bold")
@@ -10960,7 +10960,7 @@ end
             local act2 = ultimate.act2Commands[ultimate.cfg.vars["Taunt 2.1"]]
     
             RunConsoleCommand("act2", act2)
-            ultimate.nextact2 = CurTime() + 0.17
+            ultimate.nextact2 = CurTime() + 0.3
         end
 
         if ultimate.cfg.vars["Yaw base"] == 2 then
